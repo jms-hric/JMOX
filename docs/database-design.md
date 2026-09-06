@@ -1,7 +1,7 @@
 # JMO Management System — Database Design
 
 > Complete database design specification.
-> Derived from: [requirements.md](requirements.md) · [context.md](../context.md)
+> Derived from: [requirements.md](requirements.md) · [context.md](context.md)
 
 ---
 

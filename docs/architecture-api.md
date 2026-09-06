@@ -1,7 +1,7 @@
 # JMO Management System — Architecture & API Specification
 
 > System architecture and REST API design.
-> Derived from: [requirements.md](requirements.md) · [database-design.md](database-design.md) · [context.md](../context.md)
+> Derived from: [requirements.md](requirements.md) · [database-design.md](database-design.md) · [context.md](context.md)
 
 ---
 

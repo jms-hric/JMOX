@@ -1,7 +1,7 @@
 # JMO Management System — Security, Testing & Deployment
 
 > Combined security specification, testing strategy, and deployment guide.
-> Derived from: [requirements.md](requirements.md) · [architecture-api.md](architecture-api.md) · [context.md](../context.md)
+> Derived from: [requirements.md](requirements.md) · [architecture-api.md](architecture-api.md) · [context.md](context.md)
 
 ---
 

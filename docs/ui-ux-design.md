@@ -1,7 +1,7 @@
 # JMO Management System — UI/UX Design Specification
 
 > UI/UX design for the React web application and Flutter Android application.
-> Derived from: [requirements.md](requirements.md) · [context.md](../context.md)
+> Derived from: [requirements.md](requirements.md) · [context.md](context.md)
 
 ---
 

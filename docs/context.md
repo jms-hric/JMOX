@@ -1,389 +1,2025 @@
-# JMO Management System — Context File Audit (Consolidated)
+# JMOX — Project Context
 
-## Confirmed Decisions
-
-- **Hosting: Vercel.** Production must be cloud-hosted on Vercel + a custom domain. This is a firm architectural decision — it constrains the backend to Vercel's serverless execution model (stateless functions, no long-lived background processes, per-request execution time limits). Design the backend around this model rather than assuming a traditional always-on server.
-- **Teacher accounts are created only by Admin — no teacher self-registration.** Matches Section 51's "Create Teachers" step. A Teacher account starts in an `invited` state and is activated by the teacher via a time-limited emailed link before first login.
-
----
-
-## Drop-in text patches for CONTEXT.md
-
-**Section 4 (Deployment)** — replace the hedge with a firm statement:
-```
-Production must be cloud-hosted on Vercel + a custom domain. This is
-a firm architectural decision, not one option among several — it
-constrains the backend to Vercel's serverless execution model
-(stateless functions, no long-lived background processes, per-request
-execution time limits). Design the backend around this model rather
-than assuming a traditional always-on server. See Critical items
-#16–#18 below for what this rules out.
-```
-
-**Section 41 (Authentication)** — add:
-```
-Account provisioning: Teacher and Admin accounts are created
-exclusively by Admin. There is no public sign-up endpoint for any
-role, on web or Android. A Teacher account starts in an `invited`
-state and is activated by the teacher via a time-limited emailed
-link before first login (see item #20).
-```
-
-**Section 7 (Admin capabilities)** — footnote the existing "Manage
-teachers" bullet: *"includes sole authority to create teacher
-accounts — see Section 41."*
+> **Project:** Junior Mathematics Olympiad (JMO) Management System  
+> **Product name:** JMOX  
+> **Specification:** v2.0  
+> **Status:** Architecture and core requirements confirmed  
+> **Purpose:** Institutional management system for Junior Mathematics Olympiad operations
 
 ---
 
-## 🔴 CRITICAL
+## 1. Project Summary
 
-### 1. Real production IP leaked inside the "don't hardcode" example (Section 5)
-The doc says "Never hard-code: `49.244.136.23`" — but that's an actual
-former production IP, sitting in plaintext in a file that will likely
-end up in a git repo or shared with contractors/an AI assistant.
+JMOX is a complete web + Android management system for running the Junior Mathematics Olympiad.
 
-**Fix:** Redact it. Replace with a placeholder:
-```
-Never hard-code IP addresses, ports, or local network paths
-(e.g. 192.0.2.10). All endpoints must resolve via PUBLIC_BASE_URL.
-```
-If `49.244.136.23` is still a live/reachable host anywhere (router,
-old VPS, camera, etc.), treat this as a secrets leak and rotate/retire
-it, not just delete the line.
+The system manages:
 
-### 2. RBAC is required (Sec 45) but only 2 roles exist and no Role/Permission entities (Sec 7, 43, 60)
-Section 7 gives Admin the power to "Manage permissions," Section 45
-mandates "Role-based access control," but Section 43's core data
-models list no `Role` or `Permission` entity — access is implicitly
-hardcoded to `Admin` / `Teacher`. This is internally inconsistent:
-either permission management isn't real in v1, or the data model is
-incomplete.
+- Students
+- Teachers
+- Classes
+- Batches
+- Academic years
+- Sessions
+- Attendance
+- Monthly Mini Olympiads
+- Annual Full Olympiad
+- Olympiad papers
+- Paper versions
+- Sections
+- Syllabus
+- Topics
+- Questions
+- Question options
+- Answer keys
+- Student answers
+- Manual evaluation
+- OMR scanning and review
+- Assessment results
+- Rankings
+- Student performance
+- Academic history
+- Awards
+- Certificates
+- Reports
+- Exports
+- User accounts
+- Authentication
+- Authorization
+- Audit logs
+- System settings
+- Custom student fields
 
-"Who creates accounts" is now settled (Admin only). The separate
-question — whether permissions stay fixed to Admin/Teacher (Option A)
-or need a real `Role`/`Permission` model (Option B) — is still open.
-
-**Fix — pick one and state it explicitly:**
-- **Option A (recommended for v1):** Drop "Manage permissions" from
-  Admin's list for now. Two fixed roles, enforced server-side via a
-  `role` enum on `User`. Simple, matches Section 60's confirmed scope.
-- **Option B:** Add `Role` and `Permission` (+ join table) to Section
-  43 and define what "custom permission" actually means (per-batch
-  overrides? feature flags?). Don't leave it implied.
-
-### 3. "Overall" ranking mixes classes with different max marks (Sec 29 vs Sec 16/18)
-Section 16 says each class can have a different paper (different
-question count/marks). Section 18's sample is 40 marks for Class 1;
-Class 2/3 papers aren't guaranteed to also total 40. But Section 29's
-"Overall" ranking example ranks Student A (Class 1, score 38) above
-Student B (Class 2, score 37) using **raw score** — which is invalid
-if the papers don't share the same total marks. This is a real
-scoring bug baked into the spec's own example.
-
-**Fix:** Define "Overall" ranking as either:
-- ranked by **percentage**, not raw score, whenever classes/papers
-  have different max marks; or
-- scoped to be **per-Olympiad-per-class only**, and rename the
-  ambiguous "Overall" ranking to "Cross-class ranking (by %)" if it's
-  still wanted.
-State this explicitly in Section 29 and Section 30 (tie-breaking must
-also then operate on normalized section scores, not raw, if classes
-differ in marks-per-question).
-
-### 4. No snapshotting of class/batch/paper at exam time (Sec 14, 28, 31, 43)
-`AssessmentResult` / `StudentAnswer` are only listed as referencing
-`Student`, `Olympiad`, `Paper`, `Question` — implicitly via live FKs
-to the student's *current* class/batch. But Section 14 requires that
-moving a student to a new class must never change historical results.
-If the result record doesn't **snapshot** the class/batch/paper-version
-the student sat under at the time, a batch/class transfer or an
-answer-key edit later will silently corrupt historical rankings —
-directly violating Section 44 ("Published results cannot silently
-change").
-
-**Fix — add to Section 43:**
-```
-AssessmentResult must store (not just reference):
-  - class_at_time_of_exam
-  - batch_at_time_of_exam
-  - paper_version_id (see #5 below)
-These are immutable once the result is Published.
-```
-
-### 5. Questions/answer keys are mutable after publication (Sec 19, 22, 28, 44)
-Nothing stops Admin from editing a question or answer key that
-already has Published results attached. Editing in place after
-publication silently changes historical correctness — contradicts
-Section 44 directly.
-
-**Fix:** Papers/Sections/Questions/AnswerKeys become **immutable once
-any linked result is Published**. Further changes require creating a
-new version (`paper_version`), never in-place edit. Add `version` and
-`locked_at` fields to `OlympiadPaper` and `AnswerKey` in Section 43.
-
-### 16. OMR processing can't run inside a Vercel serverless function
-Vercel serverless functions are billed and capped per-invocation —
-the default execution window is short (single-digit seconds unless
-you raise it), and even the extended limits available on paid plans
-are meant for typical request/response work, not image-processing
-pipelines. Bubble detection across a whole batch's scanned sheets is
-exactly the workload that blows through this. The Section 3
-architecture diagram wires "OMR Engine" directly off the backend like
-a normal in-process call — that shape doesn't survive contact with
-Vercel.
-
-**Fix:** OMR processing runs as a **separate, non-Vercel worker**
-(a small always-on service on Fly.io/Railway/Render, or a
-serverless-native queue like Inngest/Trigger.dev/QStash that's built
-for exactly this). Vercel functions only *enqueue* a job and return
-immediately; the teacher-facing UI polls `OMRSubmission.status`.
-
-### 17. No database connection pooling specified — this will break under real concurrent load
-Vercel functions are stateless and scale by spinning up many
-concurrent invocations. Each one that opens its own Postgres
-connection, under load (e.g. a whole batch submitting attendance at
-once, or bulk OMR review), will exhaust Postgres's connection limit.
-This is the single most common way Vercel + Postgres deployments
-break in production, and the doc doesn't mention it at all.
-
-**Fix:** Pick a serverless-friendly Postgres provider with built-in
-pooling (Neon, Supabase, or Vercel Postgres) and use its pooled
-connection string (or PgBouncer) for all serverless function
-connections — never a direct unpooled connection.
-
-### 18. Nothing in the doc accounts for Vercel functions sharing no memory
-Session state, rate-limit counters, and OMR job status all implicitly
-assume "the server remembers this" — but there is no persistent
-server process on Vercel; every invocation is its own isolated
-instance. Section 45's "session management" and "rate limiting," and
-Section 40's offline-sync idempotency, all need an **external** store
-to work at all (a DB table, or a fast store like Upstash Redis, which
-is the common serverless-native pairing with Vercel).
-
-**Fix:** State explicitly that sessions, rate-limit counters, and job
-status live in the database or an external Redis-compatible store —
-never in function memory.
-
-### 19. Cookie-based auth (Sec 45) doesn't map onto the Android client
-"HTTP-only authentication" works naturally for the web app. Android
-has no cookie jar in the same sense — it needs a token-based scheme.
-Section 41 requires identical permissions across web and Android, but
-never says the two platforms will authenticate differently, so this
-will get built inconsistently unless it's named now.
-
-**Fix:** Web uses an HTTP-only, Secure, SameSite session cookie.
-Android uses a short-lived access token + refresh token, with the
-refresh token stored in Android Keystore-backed encrypted storage
-(never plain SharedPreferences). Both paths resolve to the same
-server-side role/permission check — one authorization layer, two
-credential-delivery mechanisms.
+JMOX is intended for real institutional use. Data correctness, security, reliable assessment calculations, and historical preservation are more important than visual polish.
 
 ---
 
-## 🟠 IMPORTANT
+## 2. Product Principles
 
-### 6. Tie-break rank numbering isn't defined (Sec 30)
-"If still tied, same rank" — okay, but what does the *next* student's
-rank become? Standard competition ranking has two common conventions
-(1-2-2-4, skipping, vs 1-2-2-3, dense). The doc never picks one, so
-two developers will implement it two different ways.
+Priority order:
 
-**Fix:** State explicitly: *"Use standard competition ranking
-(1-2-2-4): tied students share the lower rank number, and the next
-distinct score skips ranks equal to the number of students tied
-above it."* (Or pick dense ranking if that's actually wanted — just
-name it.)
+1. Data correctness
+2. Security
+3. Permission control
+4. Reliable assessment calculations
+5. Easy teacher workflows
+6. Historical data preservation
+7. API reliability
+8. Mobile support
+9. Performance
+10. Visual polish
 
-### 7. Negative marking is never addressed (Sec 25, 26)
-Olympiad-style MCQ exams frequently penalize wrong answers. The spec
-only defines Correct / Incorrect / Unanswered with marks coming "from
-the question configuration," but never says whether Incorrect can
-subtract marks.
+### Absolute rules
 
-**Fix:** Add to Section 25: `Question` needs an optional
-`negative_marks` field (default 0), and scoring must explicitly
-support negative marking per-section or per-question, since this
-changes total score, section score, and therefore ranking tie-breaks.
-
-### 8. OMR Engine shown as synchronous, no job/queue model (Sec 22–24, architecture diagram)
-The architecture diagram wires OMR Engine directly off the backend
-like a normal service call. Bulk OMR scanning (a whole batch's sheets
-uploaded at once) is not going to be fast enough to be request/response.
-
-**Note:** Vercel's execution model makes this mandatory, not just best
-practice. See item #16.
-
-**Fix:** OMR processing must be async: upload → job queued → status
-(`pending/processing/needs_review/failed`) → teacher polls or gets
-notified → review screen. Add `OMRSubmission.status` and
-`OMRSubmission.job_id` to Section 43.
-
-### 9. Offline sync conflict resolution is unspecified (Sec 40)
-"Idempotent, no duplicates" is stated, but not what happens when the
-same student's attendance for the same session is recorded differently
-on two devices before either syncs (e.g., teacher marks Present
-offline, admin corrects to Absent online, then the offline record
-syncs later and overwrites it).
-
-**Fix:** Define a policy explicitly, e.g.: *server timestamp wins on
-conflict; a losing offline write is not discarded but logged to
-AuditLog and flagged for manual review, never silently dropped.*
-
-### 10. `OMR_STORAGE_PATH` env var contradicts the "no local storage" rule (Sec 5 vs Sec 6)
-Section 6 bans depending on local filesystem paths for production
-persistence, but Section 5's example env vars include
-`OMR_STORAGE_PATH=...`, which reads like a filesystem path.
-
-**Note:** Now unambiguous — Vercel functions can't durably write to
-local disk at all (only an ephemeral `/tmp`), so this must be an
-object-storage key prefix, full stop.
-
-**Fix:** Rename to `OMR_STORAGE_PREFIX` (an object-storage key prefix,
-e.g. `omr-scans/`), not a filesystem path, to remove the ambiguity.
-
-### 11. No CSRF protection mentioned despite cookie-based sessions (Sec 45)
-"HTTP-only authentication" + "secure session management" is listed,
-but CSRF isn't — and HTTP-only cookies are exactly the case that
-needs CSRF tokens on state-changing requests (attendance edits,
-result publication, etc.).
-
-**Fix:** Add "CSRF protection on all state-changing endpoints" to
-Section 45's required list.
-
-### 12. Enumerable/guessable identifiers risk (Sec 45 "secure generated identifiers")
-This is stated but vague. If `Student ID` (Section 12) doubles as the
-public-facing identifier and is sequential, batches/rosters become
-enumerable by any authenticated teacher account, or leak participant
-counts externally.
-
-**Fix:** Separate **internal DB primary key** (sequential is fine)
-from **external/public identifier** (UUID or similarly non-sequential),
-explicitly, in Section 43.
-
-### 20. No account-activation flow for Admin-created accounts
-If Admin creates the account, how does the teacher get their first
-password? Admin **setting** a teacher's password directly is a
-security anti-pattern — it means Admin can log in as any teacher.
-
-**Fix:** Admin creates the account shell (name, email) only. The
-system emails a time-limited invite link; the teacher sets their own
-password on first use. Add `User.status`: `invited / active / disabled`.
-
-### 21. No password-reset flow exists anywhere in the doc
-Since there's no self-registration to fall back on, self-service
-"forgot password" (emailed reset link) isn't optional — without it,
-every lockout becomes a support ticket to Admin.
-
-**Fix:** Add a standard email-based reset-link flow to Section 41,
-same time-limited-token pattern as the invite flow above.
-
-### 22. Teacher deactivation isn't addressed
-When a teacher leaves, Admin needs to disable login without deleting
-the account — hard-deleting would orphan every `AuditLog`,
-`Attendance`, and `OMRSubmission.reviewed_by` row that references
-"who did this." This is the exact historical-preservation principle
-Section 14 already applies to students, just not yet applied to
-`User`.
-
-**Fix:** `User.status = disabled` on offboarding. Never a hard delete.
-
-### 23. Teacher has no public-facing ID separate from the internal database key
-Student already gets a `Student ID` (Section 12). Teacher doesn't.
-For the same reason as item #12 (don't expose sequential internal
-PKs), Teacher should get the same pattern for consistency, especially
-since these accounts are all Admin-provisioned and worth tracking by
-a stable human-facing ID (e.g. on printed OMR review sheets, reports).
-
-**Fix:** Add `Teacher.public_id`, generated at creation, separate
-from the internal primary key.
+- Never sacrifice data integrity for UI convenience.
+- Never trust frontend authorization.
+- Important business logic must live on the backend.
+- Historical academic and Olympiad records must be preserved.
+- Published results must not silently change.
+- Published-paper/answer-key history must be immutable.
+- Do not use fake buttons or mock data in place of real functionality.
+- Incomplete functionality must be explicitly marked as incomplete.
+- Do not invent requirements.
 
 ---
 
-## 🟡 WORTH FLAGGING (scope/clarity gaps, not bugs yet)
+# 3. Users and Roles
 
-### 13. Children's personal data, no privacy/retention policy (Sec 12, "real institutional use")
-Student photos, DOB, guardian contact info, phone/email are all
-collected for minors. The spec has no data-retention, access-scoping,
-or consent language at all, despite being explicit that this is for
-real institutional use.
+## 3.1 Admin
 
-**Fix (at minimum, add to Section 45):** who can view/export guardian
-contact info and student photos beyond assigned teachers/admin, and
-how long data is retained after a student leaves.
+Admin has full system access.
 
-### 14. Session/schedule generation is undefined (Sec 10, 11)
-"Week 1 / Session 1, 2" implies a recurring schedule, but nothing
-says whether sessions are auto-generated (e.g. every Tue/Thu for a
-batch) or manually created one at a time by a teacher. This affects
-the Attendance data model directly.
+Admin can manage:
 
-**Fix:** State it — recommend auto-generating sessions from a
-per-batch weekly schedule (2 sessions/week per Section 10), with
-manual override for holidays/cancellations.
+- Students
+- Teachers
+- Classes
+- Batches
+- Teacher/student assignments
+- Academic years
+- Olympiads
+- Papers
+- Sections
+- Questions
+- Answer keys
+- Evaluation
+- Results
+- Rankings
+- Attendance
+- Syllabus
+- Topics
+- Awards
+- Certificates
+- Reports
+- Exports
+- Users
+- Custom fields
+- Settings
+- Audit logs
 
-### 15. Custom field schema changes vs historical CustomFieldValue records (Sec 13, 14)
-If Admin deletes or retypes a custom field (e.g. changes "Emergency
-Contact" from text to a structured type), existing
-`CustomFieldValue` rows for withdrawn/past students could become
-orphaned or misread — conflicting with Section 14's "never destroy
-historical data" rule.
+### Account provisioning
 
-**Fix:** Custom fields should be soft-deleted/deprecated, never hard
-deleted, and type changes should create a new field rather than
-mutate an existing one with historical values attached.
+Admin is the sole authority for account creation.
 
-### 24. Object storage provider still isn't picked, and Vercel doesn't include one
-Section 5's env vars (`STORAGE_ENDPOINT/ACCESS_KEY/SECRET_KEY`) read
-as generic S3-compatible config. If you instead use Vercel Blob
-(simplest native integration with a Vercel deployment), the
-credential shape is different (`BLOB_READ_WRITE_TOKEN`, no endpoint/
-access/secret triplet). Decide now so the env var spec in Section 5
-actually matches what gets built — Vercel Blob vs. an S3-compatible
-option (Cloudflare R2, AWS S3, Supabase Storage) are both reasonable,
-but the doc currently assumes the latter shape without saying so.
-
-### 25. Vercel Cron has plan-tied limits
-If session auto-generation (item #14) or any nightly job (backups,
-academic-year rollover) ends up needed, confirm the Vercel plan
-supports the required frequency — lower tiers restrict cron to
-infrequent runs. If more than that is needed, use an external
-scheduler triggering a Vercel endpoint rather than assuming unlimited
-in-platform cron.
+There is no public registration.
 
 ---
 
-## Summary of concrete data-model additions (Section 43 patch, cumulative)
+## 3.2 Teacher
 
-```
-Add:
-  Role, Permission              (only if RBAC Option B — see #2)
-  OlympiadPaper.version, .locked_at
-  AnswerKey.version, .locked_at
-  AssessmentResult.class_at_time_of_exam
-  AssessmentResult.batch_at_time_of_exam
-  AssessmentResult.paper_version_id
-  OMRSubmission.status, .job_id
-  Question.negative_marks
-  Student.public_id              (separate from internal PK)
-  Teacher.public_id              (separate from internal PK)
-  User.status                    (invited / active / disabled)
+Teacher can:
+
+- View assigned batches
+- View students in permitted batches
+- Record attendance
+- View attendance history
+- Enter student answers
+- Upload OMR sheets
+- Review OMR results
+- Confirm evaluation
+- View assigned Olympiad results
+- View student performance
+- Generate permitted reports
+
+Teacher must never access or modify unrelated batches or administrative data.
+
+The backend must enforce permissions. Hiding UI controls is not sufficient.
+
+---
+
+## 3.3 Student
+
+### v1 rule
+
+Students do **not** have accounts and do **not** log in.
+
+---
+
+# 4. Role Model
+
+v1 has exactly two fixed application roles:
+
+```text
+admin
+teacher
 ```
 
+Do not build a configurable Role/Permission management system unless the specification is explicitly revised.
+
+Permissions are enforced server-side in FastAPI.
+
 ---
 
-## Priority order to fix these
+# 5. Academic Structure
 
-1. **#17 + #18** — DB pooling and an external session/rate-limit/job
-   store. These are Phase 1 (Foundation) decisions; get them wrong and
-   every later phase inherits the mistake.
-2. **#16** — OMR worker architecture, decided before Phase 1's backend
-   shape is finalized (even though OMR itself is built in Phase 5).
-3. **#19** — Android token auth vs. web cookie auth, decided during
-   Phase 1's auth work, not bolted on in Phase 9.
-4. **#4 + #5** — result snapshotting and paper/answer-key immutability,
-   before Phase 5/6.
-5. **#3** — ranking normalization across classes, before Phase 6.
-6. **#2 + #20 + #21 + #22** — account lifecycle (roles, invite, reset,
-   deactivate), before Phase 1 auth work ships.
-7. **#1** — leaked IP, fix immediately, independent of build phase.
-8. Everything else — incremental, no schema-migration risk.
+## 5.1 Classes
+
+Initial classes:
+
+- Class 1
+- Class 2
+- Class 3
+
+Classes are data-driven and must not be hard-coded.
+
+Admin must be able to create additional classes later.
+
+---
+
+## 5.2 Batches
+
+A batch is a teacher-managed group of students.
+
+The system must support:
+
+- Multiple batches per teacher
+- Different classes per teacher
+- Multiple students per batch
+- Teacher assignment
+- Student assignment
+- Historical batch assignments
+
+Do not assume:
+
+- one teacher = one batch
+- one batch = one class
+
+---
+
+## 5.3 Academic Years
+
+Academic years are first-class entities.
+
+Student enrollment, class membership, batch membership, sessions, and attendance should preserve academic-year history.
+
+---
+
+# 6. JMO Schedule
+
+Default JMO schedule:
+
+- 2 classes per week
+- 2 hours per class
+
+Sessions belong to JMO teaching sessions, not to a generic school timetable.
+
+Default model:
+
+```text
+Week N
+  ├── Session 1
+  └── Session 2
+```
+
+Sessions are auto-generated per batch from the weekly schedule.
+
+Manual overrides must support holidays and cancellations.
+
+---
+
+# 7. Attendance
+
+## 7.1 Attendance states
+
+Allowed states:
+
+- Present
+- Absent
+- Late
+- Excused
+
+## 7.2 Teacher workflow
+
+```text
+Login
+→ My Batches
+→ Select Batch
+→ Select Session/Date
+→ Mark Students
+→ Save
+```
+
+## 7.3 Rules
+
+- Prevent duplicate attendance for the same student + session.
+- Attendance is historical.
+- Attendance is auditable.
+- Student profile must show attendance totals and percentage.
+
+Student attendance summary:
+
+- Present count
+- Absent count
+- Late count
+- Excused count
+- Attendance percentage
+
+---
+
+# 8. Student Records
+
+## 8.1 Personal information
+
+Student fields:
+
+- public student ID
+- first name
+- middle name
+- last name
+- date of birth
+- gender
+- photo
+- phone
+- email
+- address
+
+## 8.2 Guardian information
+
+- name
+- relationship
+- phone
+- email
+- address
+
+## 8.3 JMO information
+
+- class
+- batch
+- enrollment date
+- status
+- teacher
+- academic history
+
+Allowed student statuses:
+
+```text
+Active
+Inactive
+Graduated
+Withdrawn
+```
+
+## 8.4 Performance
+
+Student profile must support:
+
+- Attendance
+- Olympiad participation
+- Scores
+- Percentages
+- Rankings
+- Section performance
+- Topic performance
+- Awards
+- Certificates
+- Academic history
+- Improvement over time
+
+---
+
+# 9. Student Custom Fields
+
+Admin must be able to create flexible custom student fields.
+
+Examples:
+
+- School Name
+- Previous Olympiad
+- Special Notes
+- Emergency Contact
+- Custom Identifier
+
+Do not hard-code every future student field into the Student table.
+
+### Custom field rules
+
+- Fields are soft-deleted/deprecated.
+- Never hard-delete fields that may have historical values.
+- Changing a custom field's type creates a new field rather than mutating the existing field.
+- Historical CustomFieldValue records must remain valid.
+
+---
+
+# 10. Historical Data Preservation
+
+Historical data is a core requirement.
+
+When a student changes:
+
+- class
+- batch
+- teacher
+- academic year
+
+the previous information remains accessible.
+
+Historical Olympiad results must remain tied to the student's state at the time of the exam.
+
+A later class/batch change must never rewrite a published historical result.
+
+---
+
+# 11. Olympiad Types
+
+JMOX supports two assessment types:
+
+## Monthly Mini Olympiad
+
+Recurring monthly assessment.
+
+## Annual Full Olympiad
+
+Yearly major assessment.
+
+Both must use the same flexible assessment architecture.
+
+---
+
+# 12. Olympiad Paper
+
+Each Olympiad may have different papers for different classes.
+
+Paper configuration includes:
+
+- name
+- class
+- Olympiad
+- time limit
+- total marks
+- sections
+- questions
+- syllabus
+- answer key
+
+Papers are versioned.
+
+Important fields include:
+
+- version
+- locked_at
+
+### Immutability rule
+
+Once any linked result is published:
+
+- paper becomes immutable
+- answer key becomes immutable
+- future edits require a new version
+- historical results continue using the old version
+
+Never modify a published paper in-place.
+
+---
+
+# 13. Paper Sections
+
+Sections are configurable.
+
+A section may contain:
+
+- name
+- description
+- number of questions
+- marks per question
+- total marks
+- topics
+- question types
+
+Do not hard-code section names.
+
+Possible examples:
+
+- Logical Reasoning
+- Mathematical Reasoning
+- Everyday Mathematics
+- Achievers Section
+
+These are examples, not fixed system sections.
+
+---
+
+# 14. Example Class 1 Paper
+
+Reference example only:
+
+```text
+Logical Reasoning       10 questions × 1 = 10
+Mathematical Reasoning  10 questions × 1 = 10
+Everyday Mathematics    10 questions × 1 = 10
+Achievers Section        5 questions × 2 = 10
+
+Total: 35 questions
+Total: 40 marks
+Time: 1 hour
+```
+
+Different classes may use different paper structures and different total marks.
+
+---
+
+# 15. Question Bank
+
+Questions support:
+
+- question text
+- options
+- correct answer
+- marks
+- negative marks
+- section
+- topic
+- difficulty
+- explanation
+- image
+- diagram
+
+Question images are stored in Supabase Storage.
+
+The system must support:
+
+- text-only questions
+- image questions
+- diagram questions
+
+---
+
+# 16. Question Types
+
+v1 priority:
+
+- Multiple Choice Question
+- OMR-compatible question
+
+The assessment engine should be extensible so additional question types can be added later without rewriting the scoring system.
+
+---
+
+# 17. Negative Marking
+
+Each question may define:
+
+```text
+negative_marks
+```
+
+Default:
+
+```text
+0
+```
+
+Never assume all questions are worth one mark.
+
+Scoring must read the configured:
+
+- positive marks
+- negative marks
+
+from question configuration.
+
+Example:
+
+```text
+Correct    = +2
+Incorrect  = -0.5
+Unanswered = 0
+```
+
+The example is illustrative only.
+
+---
+
+# 18. Syllabus and Topics
+
+Syllabus is data-driven.
+
+Syllabus must be configurable per class.
+
+Topics can be associated with questions.
+
+This enables:
+
+- topic-level analysis
+- topic mastery later
+- long-term performance tracking
+
+---
+
+# 19. Assessment Format
+
+v1 examinations are paper-based.
+
+Students do not take the examination online.
+
+Supported evaluation modes:
+
+1. Manual answer entry
+2. OMR scanning
+
+---
+
+# 20. Manual Answer Entry
+
+Teacher enters student answers.
+
+The system compares answers against the answer key.
+
+System calculates:
+
+- correct
+- incorrect
+- unanswered
+- section score
+- total score
+- percentage
+- rank
+
+Scoring must use each question's configured marks and negative marks.
+
+---
+
+# 21. OMR Processing
+
+OMR must run through the FastAPI backend.
+
+Technology:
+
+- OpenCV
+- Python
+- FastAPI background processing
+
+Do not tightly couple OMR processing to the Android UI.
+
+The same processing pipeline should support:
+
+- Android camera capture
+- web image upload
+- future scanning tools
+
+---
+
+# 22. OMR Submission States
+
+Use explicit processing states:
+
+```text
+pending
+processing
+needs_review
+failed
+confirmed
+```
+
+The UI must reflect the actual processing state.
+
+OMR failures must be recoverable.
+
+Uncertain detections must be flagged per question for human review.
+
+### Critical OMR rule
+
+The system must never silently guess an uncertain answer.
+
+OMR processing must never auto-publish results.
+
+---
+
+# 23. Android OMR Workflow
+
+```text
+Open Camera
+→ Capture OMR
+→ Detect Paper
+→ Detect Answers
+→ Upload/Process
+→ Review
+→ Confirm
+```
+
+Request camera permission only when required.
+
+---
+
+# 24. Student Answers
+
+Every student answer belongs to:
+
+- Student
+- Olympiad
+- Paper
+- Question
+
+The evaluation engine compares:
+
+```text
+student_answer
+vs
+correct_answer
+```
+
+Evaluation states:
+
+- Correct
+- Incorrect
+- Unanswered
+
+---
+
+# 25. Section Performance
+
+For each student and assessment, calculate section performance.
+
+Example:
+
+```text
+Logical Reasoning       8/10
+Mathematical Reasoning  7/10
+```
+
+Values may be stored or reproducibly derived.
+
+---
+
+# 26. Topic Performance
+
+For each topic calculate:
+
+- attempted
+- correct
+- incorrect
+- score
+- percentage
+
+Topic performance supports long-term student analysis.
+
+---
+
+# 27. Results
+
+Result lifecycle:
+
+```text
+Draft
+→ Evaluated
+→ Reviewed
+→ Published
+→ Locked
+```
+
+### Result rules
+
+- OMR processing does not finalize a result.
+- Teacher/Admin must confirm the result.
+- Ordinary teachers cannot modify locked results.
+- Admin can unlock.
+- Unlocking and modifications are audited.
+
+---
+
+# 28. Published Result Snapshots
+
+When a result is published, snapshot:
+
+```text
+class_at_time_of_exam
+batch_at_time_of_exam
+paper_version_id
+```
+
+These values are immutable after publication.
+
+This guarantees that:
+
+- later class changes do not alter history
+- later batch changes do not alter history
+- new paper versions do not alter old results
+
+---
+
+# 29. Rankings
+
+Required ranking scopes:
+
+- Overall
+- Class-wise
+- Batch-wise
+
+## 29.1 Cross-class normalization
+
+Different papers/classes may have different total marks.
+
+Therefore cross-class ranking must use:
+
+```text
+percentage = score / total_marks × 100
+```
+
+Overall ranking is percentage-normalized.
+
+Raw-score ranking may only be used within a single compatible paper/class scope.
+
+---
+
+# 30. Tie-Breaking
+
+Tie-break sequence:
+
+1. Higher Achievers Section score
+2. Higher Mathematical Reasoning score
+3. Higher Logical Reasoning score
+4. If still tied, same rank
+
+Ranking convention:
+
+```text
+1, 2, 2, 4
+```
+
+This is standard competition ranking.
+
+Ranking must be deterministic and reproducible.
+
+---
+
+# 31. Student Performance
+
+The student performance view should show the history across Mini and Full Olympiads.
+
+Include:
+
+- score
+- percentage
+- overall rank
+- class rank
+- batch rank
+- section performance
+- topic performance
+- attendance
+- improvement over time
+
+---
+
+# 32. Awards and Certificates
+
+Student records support:
+
+- awards
+- certificates
+- positions
+- Olympiad achievements
+- special recognition
+
+Admin can add custom achievement records.
+
+Certificate generation is a later/future enhancement unless explicitly implemented.
+
+---
+
+# 33. Reports
+
+Required report types:
+
+- Student Report
+- Olympiad Report
+- Attendance Report
+- Class Report
+
+Reports must respect user permissions.
+
+---
+
+# 34. Export
+
+Supported exports:
+
+- CSV
+- Excel
+- PDF
+
+Export permissions must match the user's normal access permissions.
+
+---
+
+# 35. Dashboards
+
+## Admin Dashboard
+
+Display:
+
+- total students
+- total teachers
+- total batches
+- total classes
+- upcoming Olympiad
+- latest Mini Olympiad
+- average attendance
+- latest results
+- recent activity
+
+## Teacher Dashboard
+
+Display:
+
+- my batches
+- my students
+- today's attendance
+- upcoming assessments
+- recent results
+
+Never expose unrelated data.
+
+---
+
+# 36. Global Search
+
+Global search must cover:
+
+- students
+- teachers
+- batches
+- classes
+- Olympiads
+- assessments
+
+Search results must always be filtered by the requesting user's permissions.
+
+A search endpoint is not an authorization mechanism.
+
+---
+
+# 37. Web Application
+
+Technology:
+
+```text
+React
+Vite
+TypeScript
+```
+
+Deployment:
+
+```text
+Vercel
+```
+
+Application type:
+
+- Desktop-first
+- Responsive
+- Permission-aware navigation
+- REST API client
+
+## Main navigation
+
+```text
+Dashboard
+
+Students
+
+Attendance
+
+Olympiads
+  ├── Mini Olympiads
+  ├── Full Olympiads
+  ├── Papers
+  ├── Questions
+  ├── OMR Evaluation
+  ├── Results
+  └── Rankings
+
+Classes & Batches
+
+Teachers
+
+Syllabus & Topics
+
+Reports
+
+Awards
+
+Administration
+  ├── Users
+  ├── Custom Fields
+  ├── Settings
+  └── Audit Logs
+```
+
+---
+
+# 38. Android Application
+
+Technology:
+
+```text
+Flutter
+```
+
+Targets:
+
+- Admin
+- Teacher
+
+Students have no login in v1.
+
+## Core screens
+
+- Login
+- Dashboard
+- My Batches
+- Student List
+- Attendance
+- Student Profile
+- OMR Camera
+- Manual Answer Entry
+- Result Review
+- Student Performance
+
+Administrative configuration remains primarily web-based.
+
+---
+
+# 39. Android Attendance
+
+Attendance UI should be touch optimized.
+
+Required controls:
+
+- Student roster
+- Present/Absent/Late toggles
+- Mark All Present
+- Save Attendance
+
+---
+
+# 40. Offline Support
+
+Android should cache at minimum:
+
+- assigned batches
+- student lists
+- relevant Olympiad data
+
+Attendance should support offline operation where practical.
+
+Flow:
+
+```text
+Record offline
+→ Store locally
+→ Connection returns
+→ Synchronize
+→ Server confirms
+```
+
+Synchronization must be idempotent.
+
+Duplicate records must not be created.
+
+---
+
+# 41. Offline Conflict Policy
+
+When the same record is changed offline and online before synchronization:
+
+**Server timestamp wins.**
+
+The losing offline change must:
+
+- not be silently discarded
+- be logged in AuditLog
+- be flagged for manual review
+
+---
+
+# 42. Authentication
+
+Authentication is owned entirely by FastAPI.
+
+Do not use Supabase Auth as the source of identity.
+
+There is one `User` table controlled by the backend.
+
+---
+
+# 43. Web Authentication
+
+Web uses:
+
+- HTTP-only session cookie
+- Secure cookie
+- SameSite protection
+- session expiration
+- CSRF protection on state-changing endpoints
+
+---
+
+# 44. Android Authentication
+
+Android uses:
+
+- short-lived JWT access token
+- refresh token
+- Android Keystore-backed encrypted storage
+
+Web and Android still use the same backend authorization layer.
+
+A user's access must be consistent across clients.
+
+---
+
+# 45. Teacher Invite Flow
+
+Admin creates an account shell containing:
+
+- name
+- email
+
+Admin does not set the teacher's password.
+
+Flow:
+
+```text
+Admin creates account
+→ Time-limited email invite
+→ Teacher opens invite
+→ Teacher sets password
+→ User becomes active
+```
+
+User status begins as:
+
+```text
+invited
+```
+
+then becomes:
+
+```text
+active
+```
+
+---
+
+# 46. Password Reset
+
+Password reset uses:
+
+- email reset link
+- time-limited token
+
+There is no self-registration flow.
+
+---
+
+# 47. Account Deactivation
+
+When a teacher leaves:
+
+```text
+User.status = disabled
+```
+
+Do not hard-delete the user.
+
+Historical references must remain valid.
+
+---
+
+# 48. API Architecture
+
+The API is versioned.
+
+Base pattern:
+
+```text
+/api/v1/
+```
+
+Core route groups:
+
+```text
+/api/v1/auth
+/api/v1/students
+/api/v1/teachers
+/api/v1/classes
+/api/v1/batches
+/api/v1/attendance
+/api/v1/olympiads
+/api/v1/papers
+/api/v1/sections
+/api/v1/questions
+/api/v1/answers
+/api/v1/omr
+/api/v1/results
+/api/v1/rankings
+/api/v1/reports
+/api/v1/awards
+```
+
+The API must be independent of any frontend client.
+
+---
+
+# 49. Core Data Model
+
+Minimum entities:
+
+```text
+User
+Teacher
+Student
+Guardian
+
+Class
+Batch
+TeacherBatch
+StudentBatch
+
+AcademicYear
+Session
+Attendance
+
+Olympiad
+OlympiadPaper
+Section
+Question
+QuestionOption
+AnswerKey
+
+StudentAnswer
+OMRSubmission
+AssessmentResult
+Ranking
+
+Topic
+Syllabus
+
+Award
+Certificate
+
+CustomField
+CustomFieldValue
+
+AuditLog
+```
+
+---
+
+# 50. Public IDs
+
+`Student.public_id` and `Teacher.public_id` must be different from the internal database primary key.
+
+Never expose sequential internal IDs externally.
+
+Reason:
+
+- prevents identifier enumeration
+- improves security
+- separates public identity from database implementation
+
+Public IDs are generated when records are created.
+
+---
+
+# 51. Core Data Rules
+
+The system must enforce:
+
+- unique student IDs
+- unique user accounts
+- server-side permission checks
+- historical enrollment records
+- historical batch assignments
+- no duplicate attendance
+- questions belong to sections
+- sections belong to papers
+- papers belong to Olympiads
+- student answers belong to an Olympiad/paper
+- results are calculated from stored answers
+- configured marks determine scoring
+- configured negative marks determine penalties
+- cross-class rankings are percentage-normalized
+- published results cannot silently change
+- published papers/answer keys cannot be mutated
+- historical results remain available indefinitely
+
+---
+
+# 52. Security Requirements
+
+Required controls:
+
+- Secure password hashing
+- HTTP-only session cookies for web
+- JWT access/refresh tokens for Android
+- Android Keystore-backed token storage
+- Session expiration
+- CSRF protection on state-changing endpoints
+- Rate limiting
+- Input validation
+- Server-side authorization
+- Role-based access control
+- Audit logging
+- Secure file uploads
+- OMR file validation
+- File size limits
+- Path traversal protection
+- HTTPS in production
+- Public IDs instead of internal sequential IDs
+
+Every protected endpoint must validate:
+
+1. Who is the user?
+2. What role do they have?
+3. What resource are they accessing?
+4. Are they allowed to read or modify it?
+
+---
+
+# 53. Audit Log
+
+Audit important changes including:
+
+- student changes
+- teacher assignments
+- batch assignments
+- attendance changes
+- question changes
+- answer-key changes
+- answer-key version creation
+- OMR uploads
+- OMR corrections
+- result changes
+- result publication
+- result unlocking
+- ranking changes
+- user changes
+- invite sent
+- account activated
+- account disabled
+- permission-relevant changes
+
+Audit record structure:
+
+```text
+User
+Action
+Entity
+Entity ID
+Timestamp
+Previous Value
+New Value
+```
+
+Audit logs cannot be edited by ordinary users.
+
+For binary files, log the storage reference rather than raw bytes.
+
+---
+
+# 54. File Storage
+
+Production file storage uses:
+
+```text
+Supabase Storage
+```
+
+Required file categories:
+
+- student photos
+- OMR scans
+- certificates
+- question images
+
+Do not rely on local filesystem persistence in production.
+
+Store file metadata/object references in Postgres.
+
+---
+
+# 55. Infrastructure
+
+## Frontend
+
+```text
+React + Vite
+Vercel
+```
+
+## Backend
+
+```text
+FastAPI + Python
+```
+
+Persistent host:
+
+- Railway
+- Fly.io
+- Render
+
+Do not deploy the FastAPI backend as a Vercel serverless function.
+
+Reason:
+
+- OMR processing may require longer execution
+- background processing is needed
+- persistent process behavior is preferred
+
+## Database
+
+```text
+Supabase PostgreSQL
+```
+
+Always use Supabase connection pooling through Supavisor.
+
+## Storage
+
+```text
+Supabase Storage
+```
+
+## OMR
+
+```text
+OpenCV
+inside FastAPI
+```
+
+---
+
+# 56. Environment Configuration
+
+Use environment variables.
+
+Example:
+
+```text
+NODE_ENV
+VITE_API_BASE_URL
+PUBLIC_BASE_URL
+DATABASE_URL
+SUPABASE_URL
+SUPABASE_SERVICE_ROLE_KEY
+SUPABASE_STORAGE_BUCKET
+JWT_SECRET
+SESSION_SECRET
+SMTP_*
+```
+
+Rules:
+
+- Never commit secrets.
+- Use separate development and production credentials/projects.
+- Do not hard-code hostnames, IP addresses, ports, or filesystem paths.
+- Frontend must never receive backend-only secrets.
+- Hosting providers should be replaceable through configuration.
+
+---
+
+# 57. Codebase Architecture
+
+Use a monorepo.
+
+Business logic must be separated from framework code.
+
+Preferred concept:
+
+```text
+core/
+  database access
+  validation
+  scoring
+  ranking
+  domain rules
+
+backend/
+  FastAPI routes
+  authentication
+  HTTP adapters
+  background tasks
+
+web/
+  React/Vite client
+
+android/
+  Flutter client
+```
+
+Important:
+
+Do not place critical business logic only in API route handlers.
+
+The core layer should be reusable by future clients/services.
+
+---
+
+# 58. Reusable React Components
+
+Required reusable components include:
+
+```text
+AppLayout
+Sidebar
+Header
+
+DataTable
+SearchBar
+FilterBar
+
+StudentProfile
+StudentForm
+StudentCard
+
+BatchSelector
+
+AttendanceTable
+AttendanceCalendar
+
+OlympiadCard
+PaperBuilder
+SectionBuilder
+
+QuestionEditor
+QuestionImageUploader
+AnswerKeyEditor
+
+OMRUploader
+OMRReview
+AnswerEntry
+
+ResultTable
+RankingTable
+PerformanceChart
+
+ReportViewer
+ExportDialog
+
+ConfirmDialog
+AuditLogTable
+
+LoadingState
+EmptyState
+ErrorState
+Toast
+```
+
+---
+
+# 59. UI/UX Principles
+
+The application must be:
+
+- clean
+- professional
+- fast
+- practical
+- accessible
+- responsive
+- teacher-friendly
+
+Avoid:
+
+- excessive animation
+- marketing-style hero sections
+- excessive gradients
+- excessive cards
+- meaningless charts
+- complicated navigation
+
+Teacher workflows should require minimal interaction.
+
+---
+
+# 60. Primary Workflows
+
+## Teacher Attendance
+
+```text
+Login
+→ My Batches
+→ Select Batch
+→ Select Session
+→ Mark Attendance
+→ Save
+```
+
+## Teacher Olympiad
+
+```text
+Login
+→ My Olympiads
+→ Select Olympiad
+→ Select Student
+→ Upload OMR OR Enter Answers
+→ Evaluate
+→ Review
+→ Confirm
+```
+
+## Admin
+
+```text
+Login
+→ Create Academic Year
+→ Create Classes
+→ Create Batches
+→ Create Teachers
+→ Send Invites
+→ Assign Teachers
+→ Register Students
+→ Assign Students
+→ Create Olympiad
+→ Create Paper
+→ Configure Sections
+→ Add Questions
+→ Set Answer Key
+→ Conduct Exam
+→ Evaluate OMR
+→ Review Results
+→ Publish Rankings
+```
+
+---
+
+# 61. Development Rules
+
+Before modifying the project:
+
+1. Read this file.
+2. Inspect the existing implementation.
+3. Understand current architecture.
+4. Do not replace working code unnecessarily.
+5. Do not invent requirements.
+6. Keep business logic framework-independent where possible.
+7. Validate all data server-side.
+8. Reuse components.
+9. Preserve historical records.
+10. Keep API platform-independent.
+11. Separate production and development configuration.
+12. Never commit secrets.
+13. Do not substitute mock data for required functionality.
+14. Do not create fake buttons.
+15. Mark incomplete features clearly.
+
+---
+
+# 62. Development Priority
+
+## Phase 0 — Infrastructure
+
+- Choose persistent FastAPI host
+- Set up Supabase
+- Set up pooled Postgres
+- Set up Storage
+- Verify pooled DB under concurrent load
+- Create monorepo
+- Create reusable core package
+
+## Phase 1 — Foundation
+
+- database
+- authentication
+- invite flow
+- cookie + JWT
+- users
+- roles
+- API
+- classes
+- batches
+
+## Phase 2 — Students
+
+- registration
+- profiles
+- guardians
+- custom fields
+- enrollment history
+- batch assignment
+
+## Phase 3 — Attendance
+
+- sessions
+- automatic session generation
+- attendance
+- history
+- teacher workflow
+- reports
+
+## Phase 4 — Olympiad
+
+- Olympiad management
+- versioned papers
+- sections
+- topics
+- questions
+- negative marking
+- answer keys
+
+## Phase 5 — Evaluation
+
+- manual answer entry
+- automatic scoring
+- negative marking
+- OMR upload
+- OMR recognition
+- OMR review
+- result confirmation
+- result snapshots
+- publish/lock
+
+## Phase 6 — Ranking
+
+- overall ranking
+- class ranking
+- batch ranking
+- percentage normalization
+- tie-breaking
+- ranking publication
+
+## Phase 7 — Performance
+
+- performance dashboards
+- topic analysis
+- section analysis
+- historical trends
+- awards
+- certificates
+
+## Phase 8 — Reports
+
+- student reports
+- attendance reports
+- Olympiad reports
+- class reports
+- CSV
+- Excel
+- PDF
+
+## Phase 9 — Android
+
+- authentication
+- dashboard
+- teacher batches
+- students
+- attendance
+- manual answers
+- OMR camera
+- results
+
+## Phase 10 — Production Hardening
+
+- monitoring
+- backups
+- custom domains
+- HTTPS
+- production reliability
+
+---
+
+# 63. Android Technology Decision
+
+Flutter is the confirmed Android technology.
+
+Reason:
+
+- backend is API-first
+- business logic is shared through the backend/core layer
+- Flutter leaves a path to iOS without replacing backend architecture
+
+Do not switch to React Native without revising the project decision.
+
+---
+
+# 64. Future Features
+
+These are explicitly future features and should not be implemented unless requested:
+
+- Student accounts
+- Parent accounts
+- Online examinations
+- iOS application
+- Desktop application
+- Better OMR recognition
+- Automated certificate generation
+- Advanced analytics
+- Topic mastery
+- SMS notifications
+- Email notifications
+- Additional competition types
+- Additional classes
+- Multiple institutions
+
+### Multi-tenancy readiness
+
+Add a nullable:
+
+```text
+institution_id
+```
+
+to core tables now if the implementation follows the multi-institution-ready design.
+
+Default it to the current single institution.
+
+---
+
+# 65. v1 Non-Goals
+
+Do not build these in v1:
+
+- Student login
+- Parent portal
+- Online student examination
+- Online payments
+- Chat
+- Social feed
+- Video classes
+- School fee management
+- Payroll
+- Full school ERP
+
+---
+
+# 66. Definition of Done
+
+JMOX v1 is considered complete when the production system supports:
+
+- Admin workflows
+- Teacher workflows
+- Student CRUD
+- Class/batch management
+- Attendance
+- Olympiad management
+- Paper configuration
+- Paper versioning
+- Sections
+- Questions
+- Answer keys
+- Manual evaluation
+- OMR evaluation
+- OMR review
+- Scoring
+- Negative marking
+- Ranking
+- Tie-breaking
+- Result review
+- Result publication
+- Result locking
+- Historical student records
+- Performance analysis
+- Reports
+- Export
+- Server-side permissions
+- Audit logs
+- Persistent storage
+- React web client
+- Flutter Android client
+- Both clients using the same production API
+
+---
+
+# 67. Final System Model
+
+```text
+Students
+   │
+   ├── Classes
+   │      └── Batches
+   │             └── Teachers
+   │                    └── Attendance
+   │
+   └── Olympiad
+          │
+          └── Paper
+                │
+                ├── Sections
+                │      └── Topics
+                │
+                ├── Questions
+                │      └── Answer Key
+                │
+                └── Student Answers
+                        │
+                        ├── Manual Evaluation
+                        │
+                        └── OMR Processing
+                               │
+                               └── Review
+                                      │
+                                      └── Confirm
+                                             │
+                                             └── Results
+                                                    │
+                                                    ├── Section Analysis
+                                                    ├── Topic Analysis
+                                                    ├── Ranking
+                                                    └── Student History
+                                                           │
+                                                           ├── Performance
+                                                           ├── Awards
+                                                           ├── Certificates
+                                                           └── Reports
+```
+
+---
+
+# 68. Confirmed v1 Summary
+
+```text
+Users:
+  Admin, Teachers
+
+Account provisioning:
+  Admin only
+
+JMO:
+  Junior Mathematics Olympiad
+
+Initial classes:
+  Class 1, Class 2, Class 3
+
+Schedule:
+  2 classes/week
+  2 hours/class
+
+Attendance:
+  Teacher-recorded
+  Per assigned batch
+
+Assessments:
+  Monthly Mini Olympiad
+  Annual Full Olympiad
+
+Exam format:
+  Paper-based
+  OMR-compatible
+
+Evaluation:
+  Manual answer entry
+  OMR scanning
+  Human review required
+
+Questions:
+  MCQ/OMR-compatible
+  Text + images
+  Negative marking supported
+
+Papers:
+  Class-specific
+  Configurable
+  Versioned
+
+Rankings:
+  Overall by normalized percentage
+  Class-wise
+  Batch-wise
+
+Tie-breaking:
+  Achievers
+  Mathematical Reasoning
+  Logical Reasoning
+  Same rank if still tied
+  Competition ranking: 1-2-2-4
+
+Students:
+  Full profile
+  Guardians
+  Attendance
+  Assessments
+  Rankings
+  Academic history
+  Awards/certificates
+  Custom fields
+
+Web:
+  React + Vite
+  Vercel
+
+Backend:
+  FastAPI
+  Persistent hosting
+
+Android:
+  Flutter
+
+Database:
+  Supabase Postgres
+  Supavisor pooling
+
+Storage:
+  Supabase Storage
+
+OMR:
+  OpenCV
+  In-process FastAPI background processing
+
+Architecture:
+  API-first
+  Multi-client
+  Versioned REST API
+  Platform-independent business logic
+
+Student login:
+  Not in v1
+
+Parent portal:
+  Not in v1
+```
+
+---
+
+# 69. Golden Rule for AI Coding Agents
+
+Treat this document as the project's authoritative product context.
+
+When requirements conflict with implementation convenience:
+
+**follow this document.**
+
+When the existing code conflicts with this document:
+
+1. Inspect the existing implementation.
+2. Preserve working behavior where possible.
+3. Identify the exact conflict.
+4. Change the smallest necessary surface.
+5. Preserve data and historical records.
+6. Do not silently invent a new product requirement.
+
+The backend/API/database are the authoritative system of record.
+
+React and Flutter are clients.
+
+Do not put business rules exclusively in a frontend.
+
+Do not let UI behavior define authorization.
+
+Do not let paper/class changes rewrite historical results.
+
+Do not let OMR automatically publish unreviewed results.
+
+Do not lose historical data.
+
+Do not expose internal sequential database IDs.

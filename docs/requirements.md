@@ -1,7 +1,7 @@
 # JMO Management System — Requirements
 
 > Combined Product Requirements Document (PRD) and Software Requirements Specification (SRS).
-> Source of truth: [context.md](../context.md)
+> Source of truth: [context.md](context.md)
 
 ---
 
