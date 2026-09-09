@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
 
 # =============================================================================
-# JMO Management System — One-Touch Run Script
+# JMO Management System – One‑Touch Run Script (rewritten)
 # =============================================================================
-# Description: Starts Docker containers (PostgreSQL & Redis), runs database
-#              seeding, starts FastAPI backend & React frontend, and displays
-#              a live status summary with credentials.
+# This script:
+#   1. Verifies required binaries (docker, docker-compose, python, node, npm).
+#   2. Starts PostgreSQL & Redis containers.
+#   3. Sets up a Python virtual environment and seeds the database.
+#   4. Launches the FastAPI backend and Vite frontend.
+#   5. Shows a summary banner with service URLs and admin credentials.
 # =============================================================================
 
-set -e
+set -euo pipefail
 
-# Terminal colors
+# ---------------------------- Terminal colors ----------------------------
 BOLD='\033[1m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
@@ -20,153 +23,147 @@ RED='\033[0;31m'
 PURPLE='\033[0;35m'
 RESET='\033[0m'
 
+# -------------------------- Project layout ---------------------------
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVER_DIR="${ROOT_DIR}/server"
 WEB_DIR="${ROOT_DIR}/apps/web"
 
-# Track PIDs for cleanup on exit
-BACKEND_PID=""
-FRONTEND_PID=""
-
+# --------------------------- Cleanup trap ---------------------------
 cleanup() {
     echo -e "\n${YELLOW}[!] Stopping development servers...${RESET}"
-    if [ -n "$BACKEND_PID" ]; then
-        kill "$BACKEND_PID" 2>/dev/null || true
-    fi
-    if [ -n "$FRONTEND_PID" ]; then
-        kill "$FRONTEND_PID" 2>/dev/null || true
-    fi
+    [[ -n "${BACKEND_PID-}" ]] && kill "${BACKEND_PID}" 2>/dev/null || true
+    [[ -n "${FRONTEND_PID-}" ]] && kill "${FRONTEND_PID}" 2>/dev/null || true
     echo -e "${GREEN}[✔] Shutdown complete. Goodbye!${RESET}"
     exit 0
 }
-
 trap cleanup SIGINT SIGTERM EXIT
 
-echo -e "${PURPLE}${BOLD}"
-echo "============================================================================="
-echo "        Junior Mathematics Olympiad (JMO) Management System                  "
-echo "============================================================================="
-echo -e "${RESET}"
+# -------------------------- Banner helper --------------------------
+banner() {
+    echo -e "${PURPLE}${BOLD}$1${RESET}"
+}
 
-# -----------------------------------------------------------------------------
-# Step 1: Check Prerequisites
-# -----------------------------------------------------------------------------
-echo -e "${BLUE}[1/5] Checking system prerequisites...${RESET}"
+banner "============================================================================="
+banner "        Junior Mathematics Olympiad (JMO) Management System                  "
+banner "============================================================================="
 
-DOCKER_CMD=""
-if command -v docker-compose &> /dev/null; then
+# ----------------------- 1. Prerequisite checks -----------------------
+banner "[1/5] Checking system prerequisites..."
+
+# Docker compose command selection
+if command -v docker-compose >/dev/null 2>&1; then
     DOCKER_CMD="docker-compose"
-elif command -v docker &> /dev/null && docker compose version &> /dev/null; then
+elif command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
     DOCKER_CMD="docker compose"
-elif command -v podman-compose &> /dev/null; then
+elif command -v podman-compose >/dev/null 2>&1; then
     DOCKER_CMD="podman-compose"
 else
-    echo -e "${RED}[✘] Error: Neither docker-compose nor podman-compose found.${RESET}"
+    echo -e "${RED}[✘] Neither docker-compose nor podman-compose found.${RESET}"
     exit 1
 fi
 
-if ! command -v node &> /dev/null || ! command -v npm &> /dev/null; then
-    echo -e "${RED}[✘] Error: Node.js and npm are required for the web frontend.${RESET}"
+# Node & npm
+if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+    echo -e "${RED}[✘] Node.js and npm are required for the web frontend.${RESET}"
     exit 1
 fi
 
-if ! command -v python3 &> /dev/null; then
-    echo -e "${RED}[✘] Error: Python 3 is required for the backend API.${RESET}"
+# Python 3
+if ! command -v python3 >/dev/null 2>&1; then
+    echo -e "${RED}[✘] Python 3 is required for the backend API.${RESET}"
     exit 1
 fi
 
 echo -e "${GREEN}[✔] Prerequisites met. Using container engine: ${DOCKER_CMD}${RESET}"
 
-# -----------------------------------------------------------------------------
-# Step 2: Start Database & Redis Containers
-# -----------------------------------------------------------------------------
-echo -e "\n${BLUE}[2/5] Starting PostgreSQL (5432) & Redis (6379) containers...${RESET}"
-cd "$ROOT_DIR"
-$DOCKER_CMD up -d
+# -------------------- 2. Start PostgreSQL & Redis --------------------
+banner "\n[2/5] Starting PostgreSQL (5432) & Redis (6379) containers..."
+cd "${ROOT_DIR}"
+${DOCKER_CMD} up -d
 
+# Wait for PostgreSQL to accept connections
 echo -n -e "${CYAN}Waiting for PostgreSQL to be ready on port 5432...${RESET}"
 MAX_RETRIES=30
-RETRY_COUNT=0
-until python3 -c "import socket; s = socket.socket(); s.settimeout(1); s.connect(('127.0.0.1', 5432)); s.close()" 2>/dev/null; do
-    echo -n "."
-    sleep 1
-    RETRY_COUNT=$((RETRY_COUNT + 1))
-    if [ "$RETRY_COUNT" -ge "$MAX_RETRIES" ]; then
-        echo -e "\n${RED}[✘] Error: Timed out waiting for PostgreSQL on port 5432.${RESET}"
+RETRY=0
+while ! python3 -c "import socket; s=socket.socket(); s.settimeout(1); s.connect(('127.0.0.1',5432))" 2>/dev/null; do
+    echo -n '.'
+    ((RETRY++))
+    if (( RETRY >= MAX_RETRIES )); then
+        echo -e "\n${RED}[✘] Timed out waiting for PostgreSQL.${RESET}"
         exit 1
     fi
+    sleep 1
 done
 echo -e " ${GREEN}[Ready]${RESET}"
 
-# -----------------------------------------------------------------------------
-# Step 3: Setup Virtualenv & Seed Database
-# -----------------------------------------------------------------------------
-echo -e "\n${BLUE}[3/5] Seeding database schema and initial users...${RESET}"
-cd "$SERVER_DIR"
+# ---------------------- 3. Setup venv & seed DB ----------------------
+banner "\n[3/5] Seeding database schema and initial users..."
+cd "${SERVER_DIR}"
 
-VENV_PATH=""
-if [ -d "${SERVER_DIR}/venv" ]; then
+# Create or reuse virtual environment
+if [[ -d venv ]]; then
     VENV_PATH="${SERVER_DIR}/venv"
-elif [ -d "${SERVER_DIR}/.venv" ]; then
+elif [[ -d .venv ]]; then
     VENV_PATH="${SERVER_DIR}/.venv"
 else
     echo -e "${YELLOW}Creating Python virtual environment...${RESET}"
     python3 -m venv venv
     VENV_PATH="${SERVER_DIR}/venv"
-    source "${VENV_PATH}/bin/activate"
-    PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 pip install -r requirements.txt
 fi
-
 source "${VENV_PATH}/bin/activate"
+
+
+# Run DB migrations (if alembic is configured) and seed data
+if command -v alembic >/dev/null 2>&1; then
+    alembic upgrade head
+fi
 python seed.py
 
-# -----------------------------------------------------------------------------
-# Step 4: Launch Backend & Frontend Servers
-# -----------------------------------------------------------------------------
-echo -e "\n${BLUE}[4/5] Launching FastAPI Backend & Vite Web Frontend...${RESET}"
+# -------------------- 4. Launch backend & frontend --------------------
+banner "\n[4/5] Launching FastAPI backend & Vite web frontend..."
 
-# Start FastAPI Uvicorn
-cd "$SERVER_DIR"
+# Backend (uvicorn) – run in background, log to temp file
+cd "${SERVER_DIR}"
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload > /tmp/jmox-backend.log 2>&1 &
 BACKEND_PID=$!
 
-# Start Vite Web Frontend
-cd "$WEB_DIR"
+# Frontend (Vite) – run in background, log to temp file
+cd "${WEB_DIR}"
 npm run dev -- --host 0.0.0.0 > /tmp/jmox-frontend.log 2>&1 &
 FRONTEND_PID=$!
 
-echo -n -e "${CYAN}Waiting for FastAPI Backend (http://localhost:8000/health)...${RESET}"
-RETRY_COUNT=0
-until curl -s http://localhost:8000/health | grep -q "healthy" 2>/dev/null; do
-    echo -n "."
-    sleep 1
-    RETRY_COUNT=$((RETRY_COUNT + 1))
-    if [ "$RETRY_COUNT" -ge 20 ]; then
+# Wait for backend health endpoint
+echo -n -e "${CYAN}Waiting for FastAPI backend (http://localhost:8000/health)...${RESET}"
+RETRY=0
+while ! curl -s http://localhost:8000/health | grep -q "healthy"; do
+    echo -n '.'
+    ((RETRY++))
+    if (( RETRY >= 20 )); then
         echo -e "\n${RED}[✘] Backend failed to start. Check /tmp/jmox-backend.log${RESET}"
         tail -20 /tmp/jmox-backend.log
         exit 1
     fi
+    sleep 1
 done
 echo -e " ${GREEN}[Healthy]${RESET}"
 
-echo -n -e "${CYAN}Waiting for Vite Web Frontend (http://localhost:5173)...${RESET}"
-RETRY_COUNT=0
-until curl -s http://localhost:5173/ | grep -q "html" 2>/dev/null; do
-    echo -n "."
-    sleep 1
-    RETRY_COUNT=$((RETRY_COUNT + 1))
-    if [ "$RETRY_COUNT" -ge 20 ]; then
+# Wait for frontend to serve HTML
+echo -n -e "${CYAN}Waiting for Vite frontend (http://localhost:5173)...${RESET}"
+RETRY=0
+while ! curl -s http://localhost:5173/ | grep -q "<html"; do
+    echo -n '.'
+    ((RETRY++))
+    if (( RETRY >= 20 )); then
         echo -e "\n${RED}[✘] Frontend failed to start. Check /tmp/jmox-frontend.log${RESET}"
         tail -20 /tmp/jmox-frontend.log
         exit 1
     fi
+    sleep 1
 done
 echo -e " ${GREEN}[Ready]${RESET}"
 
-# -----------------------------------------------------------------------------
-# Step 5: Summary Banner
-# -----------------------------------------------------------------------------
-echo -e "\n${GREEN}${BOLD}[5/5] All services are operational!${RESET}\n"
+# --------------------------- 5. Summary banner ---------------------------
+banner "\n[5/5] All services are operational!"
 
 echo -e "${CYAN}${BOLD}+-------------------------------------------------------------------------+${RESET}"
 echo -e "${CYAN}${BOLD}|                 JMO SYSTEM LIVE SERVICES & ENDPOINTS                    |${RESET}"
@@ -184,5 +181,5 @@ echo -e "${CYAN}${BOLD}+--------------------------------------------------------
 
 echo -e "${YELLOW}Press [CTRL+C] at any time to gracefully stop all services.${RESET}"
 
-# Keep script running to maintain traps and process lifecycle
+# Keep script alive so trap works
 wait

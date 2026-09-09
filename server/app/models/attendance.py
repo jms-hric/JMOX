@@ -36,7 +36,8 @@ class Attendance(Base, InstitutionMixin):
         ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False
     )
     status: Mapped[AttendanceStatus] = mapped_column(
-        Enum(AttendanceStatus), nullable=False
+        Enum(AttendanceStatus, name="attendance_status", create_type=False),
+        nullable=False,
     )
     recorded_by: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False

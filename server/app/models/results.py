@@ -58,7 +58,9 @@ class AssessmentResult(Base, TimestampMixin, InstitutionMixin):
     incorrect_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     unanswered_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     status: Mapped[ResultStatus] = mapped_column(
-        Enum(ResultStatus), nullable=False, default=ResultStatus.DRAFT
+        Enum(ResultStatus, name="result_status", create_type=False),
+        nullable=False,
+        default=ResultStatus.DRAFT,
     )
     published_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     published_by: Mapped[Optional[UUID]] = mapped_column(
@@ -107,7 +109,9 @@ class Ranking(Base, TimestampMixin, InstitutionMixin):
         ForeignKey("classes.id", ondelete="CASCADE"), nullable=False
     )
     rank: Mapped[int] = mapped_column(Integer, nullable=False)
-    rank_scope: Mapped[RankScope] = mapped_column(Enum(RankScope), nullable=False)
+    rank_scope: Mapped[RankScope] = mapped_column(
+        Enum(RankScope, name="rank_scope", create_type=False), nullable=False
+    )
     percentile: Mapped[Optional[float]] = mapped_column(Numeric(5, 2), nullable=True)
 
     # Relationships
@@ -146,7 +150,9 @@ class OMRSubmission(Base, TimestampMixin, InstitutionMixin):
     )
     image_storage_key: Mapped[str] = mapped_column(String(500), nullable=False)
     status: Mapped[OMRStatus] = mapped_column(
-        Enum(OMRStatus), nullable=False, default=OMRStatus.PENDING
+        Enum(OMRStatus, name="omr_status", create_type=False),
+        nullable=False,
+        default=OMRStatus.PENDING,
     )
     job_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     extracted_answers: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
@@ -186,7 +192,8 @@ class StudentAnswer(Base, TimestampMixin, InstitutionMixin):
     )
     selected_option: Mapped[Optional[str]] = mapped_column(String(1), nullable=True)
     entry_method: Mapped[AnswerEntryMethod] = mapped_column(
-        Enum(AnswerEntryMethod), nullable=False
+        Enum(AnswerEntryMethod, name="answer_entry_method", create_type=False),
+        nullable=False,
     )
     entered_by: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False

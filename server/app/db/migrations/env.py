@@ -1,6 +1,10 @@
 # JMO Management System — Alembic Configuration
 import os
+import sys
 from logging.config import fileConfig
+
+# Add server directory to sys.path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
@@ -74,10 +78,3 @@ async def run_async_migrations() -> None:
         await connection.run_sync(do_run_migrations)
 
     await connectable.dispose()
-
-
-if context.is_offline_mode():
-    run_migrations_offline()
-else:
-    import asyncio
-    asyncio.run(run_async_migrations())

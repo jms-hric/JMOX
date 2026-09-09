@@ -34,20 +34,43 @@ class ApiClient {
 
   Future<http.Response> post(String endpoint, Map<String, dynamic> body) async {
     final headers = await _getHeaders();
-    final response = await http.post(
+    var response = await http.post(
       Uri.parse('$baseUrl$endpoint'),
       headers: headers,
       body: jsonEncode(body),
     );
+
+    if (response.statusCode == 401) {
+      final success = await refreshToken();
+      if (success) {
+        final newHeaders = await _getHeaders();
+        response = await http.post(
+          Uri.parse('$baseUrl$endpoint'),
+          headers: newHeaders,
+          body: jsonEncode(body),
+        );
+      }
+    }
     return response;
   }
 
   Future<http.Response> get(String endpoint) async {
     final headers = await _getHeaders();
-    final response = await http.get(
+    var response = await http.get(
       Uri.parse('$baseUrl$endpoint'),
       headers: headers,
     );
+
+    if (response.statusCode == 401) {
+      final success = await refreshToken();
+      if (success) {
+        final newHeaders = await _getHeaders();
+        response = await http.get(
+          Uri.parse('$baseUrl$endpoint'),
+          headers: newHeaders,
+        );
+      }
+    }
     return response;
   }
 

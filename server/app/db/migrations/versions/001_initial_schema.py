@@ -18,21 +18,7 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Create enum types
-    op.execute("CREATE TYPE user_role AS ENUM ('admin', 'teacher')")
-    op.execute("CREATE TYPE user_status AS ENUM ('invited', 'active', 'disabled')")
-    op.execute("CREATE TYPE student_status AS ENUM ('active', 'withdrawn')")
-    op.execute("CREATE TYPE student_batch_status AS ENUM ('active', 'transferred', 'withdrawn')")
-    op.execute("CREATE TYPE batch_status AS ENUM ('active', 'completed', 'archived')")
-    op.execute("CREATE TYPE session_status AS ENUM ('scheduled', 'completed', 'cancelled')")
-    op.execute("CREATE TYPE attendance_status AS ENUM ('present', 'absent', 'late', 'excused')")
-    op.execute("CREATE TYPE olympiad_status AS ENUM ('draft', 'scheduled', 'in_progress', 'completed')")
-    op.execute("CREATE TYPE result_status AS ENUM ('draft', 'reviewed', 'published')")
-    op.execute("CREATE TYPE rank_scope AS ENUM ('class', 'cross_class')")
-    op.execute("CREATE TYPE omr_status AS ENUM ('pending', 'processing', 'needs_review', 'completed', 'failed')")
-    op.execute("CREATE TYPE answer_entry_method AS ENUM ('manual', 'omr')")
-    op.execute("CREATE TYPE custom_field_type AS ENUM ('text', 'number', 'date', 'dropdown')")
-    op.execute("CREATE TYPE audit_action AS ENUM ('create', 'update', 'delete', 'publish', 'unpublish', 'activate', 'deactivate', 'transfer', 'withdraw', 'sync_conflict')")
+
 
     # Institutions table (for multi-tenancy readiness)
     op.create_table(
@@ -50,8 +36,8 @@ def upgrade() -> None:
         sa.Column('public_id', sa.String(20), nullable=False, unique=True),
         sa.Column('email', sa.String(255), nullable=False, unique=True),
         sa.Column('password_hash', sa.String(255), nullable=True),
-        sa.Column('role', sa.Enum('admin', 'teacher', name='user_role'), nullable=False),
-        sa.Column('status', sa.Enum('invited', 'active', 'disabled', name='user_status'), nullable=False, server_default='invited'),
+        sa.Column('role', sa.Enum('admin', 'teacher', name='user_role', create_type=False), nullable=False),
+        sa.Column('status', sa.Enum('invited', 'active', 'disabled', name='user_status', create_type=False), nullable=False, server_default='invited'),
         sa.Column('institution_id', postgresql.UUID(as_uuid=True), sa.ForeignKey('institutions.id'), nullable=False),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now(), nullable=False),
@@ -97,7 +83,7 @@ def upgrade() -> None:
         sa.Column('phone', sa.String(50), nullable=True),
         sa.Column('email', sa.String(255), nullable=True),
         sa.Column('guardian_id', postgresql.UUID(as_uuid=True), sa.ForeignKey('guardians.id', ondelete='SET NULL'), nullable=True),
-        sa.Column('status', sa.Enum('active', 'withdrawn', name='student_status'), nullable=False, server_default='active'),
+        sa.Column('status', sa.Enum('active', 'withdrawn', name='student_status', create_type=False), nullable=False, server_default='active'),
         sa.Column('institution_id', postgresql.UUID(as_uuid=True), sa.ForeignKey('institutions.id'), nullable=False),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now(), nullable=False),
@@ -142,7 +128,7 @@ def upgrade() -> None:
         sa.Column('name', sa.String(50), nullable=False),
         sa.Column('class_id', postgresql.UUID(as_uuid=True), sa.ForeignKey('classes.id', ondelete='CASCADE'), nullable=False),
         sa.Column('schedule_days', sa.String(100), nullable=True),
-        sa.Column('status', sa.Enum('active', 'completed', 'archived', name='batch_status'), nullable=False, server_default='active'),
+        sa.Column('status', sa.Enum('active', 'completed', 'archived', name='batch_status', create_type=False), nullable=False, server_default='active'),
         sa.Column('institution_id', postgresql.UUID(as_uuid=True), sa.ForeignKey('institutions.id'), nullable=False),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now(), nullable=False),
@@ -159,7 +145,7 @@ def upgrade() -> None:
         sa.Column('class_id', postgresql.UUID(as_uuid=True), sa.ForeignKey('classes.id', ondelete='CASCADE'), nullable=False),
         sa.Column('enrolled_date', sa.Date, nullable=False),
         sa.Column('removed_date', sa.Date, nullable=True),
-        sa.Column('status', sa.Enum('active', 'transferred', 'withdrawn', name='student_batch_status'), nullable=False, server_default='active'),
+        sa.Column('status', sa.Enum('active', 'transferred', 'withdrawn', name='student_batch_status', create_type=False), nullable=False, server_default='active'),
         sa.Column('institution_id', postgresql.UUID(as_uuid=True), sa.ForeignKey('institutions.id'), nullable=False),
     )
     op.create_index('ix_student_batches_student_status', 'student_batches', ['student_id', 'status'])
@@ -185,7 +171,7 @@ def upgrade() -> None:
         sa.Column('batch_id', postgresql.UUID(as_uuid=True), sa.ForeignKey('batches.id', ondelete='CASCADE'), nullable=False),
         sa.Column('session_date', sa.Date, nullable=False),
         sa.Column('session_number', sa.Integer, nullable=False),
-        sa.Column('status', sa.Enum('scheduled', 'completed', 'cancelled', name='session_status'), nullable=False, server_default='scheduled'),
+        sa.Column('status', sa.Enum('scheduled', 'completed', 'cancelled', name='session_status', create_type=False), nullable=False, server_default='scheduled'),
         sa.Column('institution_id', postgresql.UUID(as_uuid=True), sa.ForeignKey('institutions.id'), nullable=False),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now(), nullable=False),
@@ -199,7 +185,7 @@ def upgrade() -> None:
         sa.Column('id', postgresql.UUID(as_uuid=True), primary_key=True, default=sa.text('gen_random_uuid()')),
         sa.Column('student_id', postgresql.UUID(as_uuid=True), sa.ForeignKey('students.id', ondelete='CASCADE'), nullable=False),
         sa.Column('session_id', postgresql.UUID(as_uuid=True), sa.ForeignKey('sessions.id', ondelete='CASCADE'), nullable=False),
-        sa.Column('status', sa.Enum('present', 'absent', 'late', 'excused', name='attendance_status'), nullable=False),
+        sa.Column('status', sa.Enum('present', 'absent', 'late', 'excused', name='attendance_status', create_type=False), nullable=False),
         sa.Column('recorded_by', postgresql.UUID(as_uuid=True), sa.ForeignKey('users.id', ondelete='RESTRICT'), nullable=False),
         sa.Column('sync_source', sa.String(20), nullable=True),
         sa.Column('recorded_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
@@ -217,7 +203,7 @@ def upgrade() -> None:
         sa.Column('description', sa.Text, nullable=True),
         sa.Column('olympiad_date', sa.Date, nullable=True),
         sa.Column('academic_year_id', postgresql.UUID(as_uuid=True), sa.ForeignKey('academic_years.id', ondelete='CASCADE'), nullable=False),
-        sa.Column('status', sa.Enum('draft', 'scheduled', 'in_progress', 'completed', name='olympiad_status'), nullable=False, server_default='draft'),
+        sa.Column('status', sa.Enum('draft', 'scheduled', 'in_progress', 'completed', name='olympiad_status', create_type=False), nullable=False, server_default='draft'),
         sa.Column('institution_id', postgresql.UUID(as_uuid=True), sa.ForeignKey('institutions.id'), nullable=False),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now(), nullable=False),
@@ -319,7 +305,7 @@ def upgrade() -> None:
         sa.Column('paper_id', postgresql.UUID(as_uuid=True), sa.ForeignKey('olympiad_papers.id', ondelete='CASCADE'), nullable=False),
         sa.Column('olympiad_id', postgresql.UUID(as_uuid=True), sa.ForeignKey('olympiads.id', ondelete='CASCADE'), nullable=False),
         sa.Column('selected_option', sa.String(1), nullable=True),
-        sa.Column('entry_method', sa.Enum('manual', 'omr', name='answer_entry_method'), nullable=False),
+        sa.Column('entry_method', sa.Enum('manual', 'omr', name='answer_entry_method', create_type=False), nullable=False),
         sa.Column('entered_by', postgresql.UUID(as_uuid=True), sa.ForeignKey('users.id', ondelete='RESTRICT'), nullable=False),
         sa.Column('institution_id', postgresql.UUID(as_uuid=True), sa.ForeignKey('institutions.id'), nullable=False),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
@@ -346,7 +332,7 @@ def upgrade() -> None:
         sa.Column('correct_count', sa.Integer, nullable=False, server_default='0'),
         sa.Column('incorrect_count', sa.Integer, nullable=False, server_default='0'),
         sa.Column('unanswered_count', sa.Integer, nullable=False, server_default='0'),
-        sa.Column('status', sa.Enum('draft', 'reviewed', 'published', name='result_status'), nullable=False, server_default='draft'),
+        sa.Column('status', sa.Enum('draft', 'reviewed', 'published', name='result_status', create_type=False), nullable=False, server_default='draft'),
         sa.Column('published_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('published_by', postgresql.UUID(as_uuid=True), sa.ForeignKey('users.id', ondelete='SET NULL'), nullable=True),
         sa.Column('institution_id', postgresql.UUID(as_uuid=True), sa.ForeignKey('institutions.id'), nullable=False),
@@ -365,7 +351,7 @@ def upgrade() -> None:
         sa.Column('olympiad_id', postgresql.UUID(as_uuid=True), sa.ForeignKey('olympiads.id', ondelete='CASCADE'), nullable=False),
         sa.Column('class_id', postgresql.UUID(as_uuid=True), sa.ForeignKey('classes.id', ondelete='CASCADE'), nullable=False),
         sa.Column('rank', sa.Integer, nullable=False),
-        sa.Column('rank_scope', sa.Enum('class', 'cross_class', name='rank_scope'), nullable=False),
+        sa.Column('rank_scope', sa.Enum('class', 'cross_class', name='rank_scope', create_type=False), nullable=False),
         sa.Column('percentile', sa.Numeric(5, 2), nullable=True),
         sa.Column('institution_id', postgresql.UUID(as_uuid=True), sa.ForeignKey('institutions.id'), nullable=False),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
@@ -381,7 +367,7 @@ def upgrade() -> None:
         sa.Column('paper_id', postgresql.UUID(as_uuid=True), sa.ForeignKey('olympiad_papers.id', ondelete='CASCADE'), nullable=False),
         sa.Column('uploaded_by', postgresql.UUID(as_uuid=True), sa.ForeignKey('users.id', ondelete='RESTRICT'), nullable=False),
         sa.Column('image_storage_key', sa.String(500), nullable=False),
-        sa.Column('status', sa.Enum('pending', 'processing', 'needs_review', 'completed', 'failed', name='omr_status'), nullable=False, server_default='pending'),
+        sa.Column('status', sa.Enum('pending', 'processing', 'needs_review', 'completed', 'failed', name='omr_status', create_type=False), nullable=False, server_default='pending'),
         sa.Column('job_id', sa.String(100), nullable=True),
         sa.Column('extracted_answers', postgresql.JSONB, nullable=True),
         sa.Column('error_message', sa.String(1000), nullable=True),
@@ -428,7 +414,7 @@ def upgrade() -> None:
         'custom_fields',
         sa.Column('id', postgresql.UUID(as_uuid=True), primary_key=True, default=sa.text('gen_random_uuid()')),
         sa.Column('field_name', sa.String(100), nullable=False),
-        sa.Column('field_type', sa.Enum('text', 'number', 'date', 'dropdown', name='custom_field_type'), nullable=False),
+        sa.Column('field_type', sa.Enum('text', 'number', 'date', 'dropdown', name='custom_field_type', create_type=False), nullable=False),
         sa.Column('dropdown_options', postgresql.JSONB, nullable=True),
         sa.Column('is_required', sa.Boolean, nullable=False, server_default='false'),
         sa.Column('is_active', sa.Boolean, nullable=False, server_default='true'),
@@ -458,7 +444,7 @@ def upgrade() -> None:
         'audit_logs',
         sa.Column('id', postgresql.UUID(as_uuid=True), primary_key=True, default=sa.text('gen_random_uuid()')),
         sa.Column('user_id', postgresql.UUID(as_uuid=True), sa.ForeignKey('users.id', ondelete='SET NULL'), nullable=True),
-        sa.Column('action', sa.Enum('create', 'update', 'delete', 'publish', 'unpublish', 'activate', 'deactivate', 'transfer', 'withdraw', 'sync_conflict', name='audit_action'), nullable=False),
+        sa.Column('action', sa.Enum('create', 'update', 'delete', 'publish', 'unpublish', 'activate', 'deactivate', 'transfer', 'withdraw', 'sync_conflict', name='audit_action', create_type=False), nullable=False),
         sa.Column('entity_type', sa.String(100), nullable=False),
         sa.Column('entity_id', postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column('before_value', postgresql.JSONB, nullable=True),

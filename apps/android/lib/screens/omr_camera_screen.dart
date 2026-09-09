@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../api/api_client.dart';
@@ -108,11 +109,31 @@ class _OmrCameraScreenState extends State<OmrCameraScreen> {
                 child: _selectedImage != null
                     ? ClipRRect(
                         borderRadius: BorderRadius.circular(12),
-                        child: Center(
-                          child: Text(
-                            'Captured Image: ${_selectedImage!.name}',
-                            style: const TextStyle(color: Colors.white),
-                          ),
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            Image.file(
+                              File(_selectedImage!.path),
+                              fit: BoxFit.contain,
+                            ),
+                            Positioned(
+                              bottom: 8,
+                              left: 8,
+                              right: 8,
+                              child: Container(
+                                padding: const EdgeInsets.all(4),
+                                decoration: BoxDecoration(
+                                  color: Colors.black54,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  _selectedImage!.name,
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(color: Colors.white, fontSize: 10),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       )
                     : Center(

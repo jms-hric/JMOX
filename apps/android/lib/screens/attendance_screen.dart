@@ -41,18 +41,25 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   }
 
   Future<void> _saveLocalAttendance() async {
-    final now = DateTime.now().toIso8601String();
+    final now = DateTime.now();
+    final timestamp = now.toIso8601String();
+    final dateStr = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
+    final sessionId = "session_$dateStr";
+
+    final List<LocalAttendanceRecord> records = [];
     for (var s in _students) {
       final record = LocalAttendanceRecord(
-        id: '${s['id']}_session_1',
+        id: '${s['id']}_$sessionId',
         studentId: s['id']!,
         studentName: s['name']!,
-        sessionId: 'session_1',
+        sessionId: sessionId,
         status: _statuses[s['id']!] ?? 'present',
-        timestamp: now,
+        timestamp: timestamp,
       );
-      await _offlineService.saveRecordLocally(record);
+      records.add(record);
     }
+    
+    await _offlineService.saveRecordsLocally(records);
     await _loadQueuedCount();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(

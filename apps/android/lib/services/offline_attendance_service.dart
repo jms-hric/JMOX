@@ -16,10 +16,18 @@ class OfflineAttendanceService {
   }
 
   Future<void> saveRecordLocally(LocalAttendanceRecord record) async {
+    await saveRecordsLocally([record]);
+  }
+
+  Future<void> saveRecordsLocally(List<LocalAttendanceRecord> newRecords) async {
     final prefs = await SharedPreferences.getInstance();
     final records = await getQueuedRecords();
-    records.removeWhere((r) => r.studentId == record.studentId && r.sessionId == record.sessionId);
-    records.add(record);
+    
+    for (var record in newRecords) {
+      records.removeWhere((r) => r.studentId == record.studentId && r.sessionId == record.sessionId);
+      records.add(record);
+    }
+    
     final jsonList = records.map((r) => r.toMap()).toList();
     await prefs.setString(_key, jsonEncode(jsonList));
   }

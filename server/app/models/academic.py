@@ -91,7 +91,9 @@ class Batch(Base, TimestampMixin, InstitutionMixin):
     )
     schedule_days: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     status: Mapped[BatchStatus] = mapped_column(
-        Enum(BatchStatus), nullable=False, default=BatchStatus.ACTIVE
+        Enum(BatchStatus, name="batch_status", values_callable=lambda x: [e.value for e in x], create_type=False),
+        nullable=False,
+        default=BatchStatus.ACTIVE,
     )
 
     # Relationships
@@ -131,7 +133,9 @@ class Session(Base, TimestampMixin, InstitutionMixin):
     session_date: Mapped[date] = mapped_column(Date, nullable=False)
     session_number: Mapped[int] = mapped_column(nullable=False)
     status: Mapped[SessionStatus] = mapped_column(
-        Enum(SessionStatus), nullable=False, default=SessionStatus.SCHEDULED
+        Enum(SessionStatus, name="session_status", create_type=False),
+        nullable=False,
+        default=SessionStatus.SCHEDULED,
     )
 
     # Relationships

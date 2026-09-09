@@ -18,6 +18,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base, TimestampMixin, InstitutionMixin, SoftDeleteMixin
+from .public_id_listeners import register_public_id_listeners
 
 
 class UserRole(str, enum.Enum):
@@ -38,9 +39,13 @@ class User(Base, TimestampMixin, InstitutionMixin):
     public_id: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    role: Mapped[UserRole] = mapped_column(Enum(UserRole), nullable=False)
+    role: Mapped[UserRole] = mapped_column(
+        Enum(UserRole, name="user_role", values_callable=lambda x: [e.value for e in x], create_type=False), nullable=False
+    )
     status: Mapped[UserStatus] = mapped_column(
-        Enum(UserStatus), nullable=False, default=UserStatus.INVITED
+        Enum(UserStatus, name="user_status", values_callable=lambda x: [e.value for e in x], create_type=False),
+        nullable=False,
+        default=UserStatus.INVITED,
     )
 
     # Relationships
@@ -98,7 +103,9 @@ class Student(Base, TimestampMixin, InstitutionMixin, SoftDeleteMixin):
         ForeignKey("guardians.id", ondelete="SET NULL"), nullable=True
     )
     status: Mapped[StudentStatus] = mapped_column(
-        Enum(StudentStatus), nullable=False, default=StudentStatus.ACTIVE
+        Enum(StudentStatus, name="student_status", values_callable=lambda x: [e.value for e in x], create_type=False),
+        nullable=False,
+        default=StudentStatus.ACTIVE,
     )
 
     # Relationships
@@ -154,7 +161,9 @@ class StudentBatch(Base, TimestampMixin, InstitutionMixin):
     enrolled_date: Mapped[date] = mapped_column(Date, nullable=False)
     removed_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     status: Mapped[StudentBatchStatus] = mapped_column(
-        Enum(StudentBatchStatus), nullable=False, default=StudentBatchStatus.ACTIVE
+        Enum(StudentBatchStatus, name="student_batch_status", values_callable=lambda x: [e.value for e in x], create_type=False),
+        nullable=False,
+        default=StudentBatchStatus.ACTIVE,
     )
 
     # Relationships
@@ -166,3 +175,6 @@ class StudentBatch(Base, TimestampMixin, InstitutionMixin):
         Index("ix_student_batches_student_status", "student_id", "status"),
         Index("ix_student_batches_batch_status", "batch_id", "status"),
     )
+
+# Register public_id listeners after model definitions
+register_public_id_listeners(User, Teacher, Student)

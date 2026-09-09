@@ -40,7 +40,9 @@ class Olympiad(Base, TimestampMixin, InstitutionMixin):
         ForeignKey("academic_years.id", ondelete="CASCADE"), nullable=False
     )
     status: Mapped[OlympiadStatus] = mapped_column(
-        Enum(OlympiadStatus), nullable=False, default=OlympiadStatus.DRAFT
+        Enum(OlympiadStatus, name="olympiad_status", create_type=False),
+        nullable=False,
+        default=OlympiadStatus.DRAFT,
     )
 
     # Relationships
