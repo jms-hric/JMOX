@@ -73,20 +73,36 @@ def generate_password_reset_token() -> tuple[str, datetime]:
 from sqlalchemy.orm import selectinload
 
 
-async def get_user_by_email(db: AsyncSession, email: str) -> Optional[User]:
-    result = await db.execute(select(User).options(selectinload(User.teacher)).where(User.email == email))
+async def get_user_by_email(db: AsyncSession, identifier: str) -> Optional[User]:
+    result = await db.execute(
+        select(User)
+        .outerjoin(Teacher, Teacher.user_id == User.id)
+        .outerjoin(Student, Student.user_id == User.id)
+        .options(selectinload(User.teacher), selectinload(User.student))
+        .where(
+            (User.email == identifier)
+            | (User.public_id == identifier)
+            | (Teacher.public_id == identifier)
+            | (Student.public_id == identifier)
+        )
+    )
     return result.scalar_one_or_none()
 
 
+
 async def get_user_by_id(db: AsyncSession, user_id: UUID) -> Optional[User]:
-    result = await db.execute(select(User).options(selectinload(User.teacher)).where(User.id == user_id))
+    result = await db.execute(
+        select(User)
+        .options(selectinload(User.teacher), selectinload(User.student))
+        .where(User.id == user_id)
+    )
     return result.scalar_one_or_none()
 
 
 async def authenticate_user(
-    db: AsyncSession, email: str, password: str
+    db: AsyncSession, identifier: str, password: str
 ) -> Optional[User]:
-    user = await get_user_by_email(db, email)
+    user = await get_user_by_email(db, identifier)
     if not user:
         return None
     if not user.password_hash:
@@ -96,6 +112,7 @@ async def authenticate_user(
     if user.status != UserStatus.ACTIVE:
         return None
     return user
+
 
 
 async def create_session_token(user_id: UUID) -> str:

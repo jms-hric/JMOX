@@ -13,6 +13,7 @@ class CurrentUser:
     role: UserRole
     status: str
     teacher_id: Optional[UUID] = None
+    student_id: Optional[UUID] = None
     institution_id: UUID = None
 
 
@@ -29,6 +30,11 @@ def is_admin(user: CurrentUser) -> bool:
 
 def is_teacher(user: CurrentUser) -> bool:
     return user.role == UserRole.TEACHER
+
+
+def is_student(user: CurrentUser) -> bool:
+    return user.role == UserRole.STUDENT
+
 
 
 def can_access_batch(

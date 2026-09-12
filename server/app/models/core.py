@@ -24,6 +24,7 @@ from .public_id_listeners import register_public_id_listeners
 class UserRole(str, enum.Enum):
     ADMIN = "admin"
     TEACHER = "teacher"
+    STUDENT = "student"
 
 
 class UserStatus(str, enum.Enum):
@@ -51,6 +52,9 @@ class User(Base, TimestampMixin, InstitutionMixin):
     # Relationships
     teacher: Mapped["Teacher | None"] = relationship(
         "Teacher", back_populates="user", uselist=False, cascade="all, delete-orphan"
+    )
+    student: Mapped["Student | None"] = relationship(
+        "Student", back_populates="user", uselist=False, cascade="all, delete-orphan"
     )
 
     __table_args__ = (
@@ -93,6 +97,9 @@ class Student(Base, TimestampMixin, InstitutionMixin, SoftDeleteMixin):
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     public_id: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
+    user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), unique=True, nullable=True
+    )
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
     date_of_birth: Mapped[date | None] = mapped_column(Date, nullable=True)
     gender: Mapped[str | None] = mapped_column(String(20), nullable=True)
@@ -109,9 +116,11 @@ class Student(Base, TimestampMixin, InstitutionMixin, SoftDeleteMixin):
     )
 
     # Relationships
+    user: Mapped["User | None"] = relationship("User", back_populates="student")
     guardian: Mapped["Guardian | None"] = relationship(
         "Guardian", back_populates="students"
     )
+
     batch_enrollments: Mapped[List["StudentBatch"]] = relationship(
         "StudentBatch", back_populates="student", cascade="all, delete-orphan"
     )
@@ -131,7 +140,8 @@ class Guardian(Base, TimestampMixin, InstitutionMixin):
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    relationship_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    relationship_type: Mapped[str | None] = mapped_column("relationship", String(50), nullable=True)
+
     phone: Mapped[str] = mapped_column(String(50), nullable=False)
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
 

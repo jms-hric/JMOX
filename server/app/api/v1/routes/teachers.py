@@ -11,7 +11,7 @@ from app.auth.dependencies import get_current_user, require_admin
 from app.models.core import Teacher, User, UserRole, UserStatus
 from app.models.academic import Batch, TeacherBatch
 from app.schemas.common import (
-    TeacherCreate, TeacherUpdate, TeacherResponse,
+    TeacherCreate, TeacherUpdate, TeacherResponse, LoginPassResponse,
     PaginatedResponse,
 )
 
@@ -88,9 +88,10 @@ async def create_teacher(
     db: AsyncSession = Depends(get_async_session),
 ):
     from app.services import create_teacher
-    teacher = await create_teacher(
+    teacher, plain_password = await create_teacher(
         db, data.full_name, data.email, data.phone,
         current_user.institution_id, current_user.id,
+        password=data.password,
     )
     await db.refresh(teacher, ["user"])
     return TeacherResponse(
@@ -101,8 +102,17 @@ async def create_teacher(
         phone=teacher.phone,
         status=teacher.user.status.value,
         assigned_batches=[],
+        login_pass=LoginPassResponse(
+            public_id=teacher.public_id,
+            full_name=teacher.full_name,
+            email_or_username=teacher.user.email,
+            password=plain_password,
+            role="teacher",
+            status=teacher.user.status.value,
+        ),
         created_at=teacher.created_at,
     )
+
 
 
 @router.get("/{teacher_id}", response_model=TeacherResponse)
@@ -241,3 +251,52 @@ async def update_teacher_batches(
     from app.services import assign_teacher_batches
     await assign_teacher_batches(db, teacher_id, batch_ids, current_user.id)
     return {"message": "Batch assignments updated"}
+
+
+@router.get("/{teacher_id}/login-pass", response_model=LoginPassResponse)
+async def get_teacher_login_pass(
+    teacher_id: UUID,
+    current_user = Depends(require_admin),
+    db: AsyncSession = Depends(get_async_session),
+):
+    teacher = await db.get(Teacher, teacher_id)
+    if not teacher or teacher.institution_id != current_user.institution_id:
+        raise HTTPException(status_code=404, detail="Teacher not found")
+
+    user = teacher.user
+    return LoginPassResponse(
+        public_id=teacher.public_id,
+        full_name=teacher.full_name,
+        email_or_username=user.email,
+        password=None,
+        role=user.role.value if hasattr(user.role, 'value') else str(user.role),
+        status=user.status.value if hasattr(user.status, 'value') else str(user.status),
+    )
+
+
+@router.post("/{teacher_id}/reset-login-pass", response_model=LoginPassResponse)
+async def reset_teacher_login_pass(
+    teacher_id: UUID,
+    current_user = Depends(require_admin),
+    db: AsyncSession = Depends(get_async_session),
+):
+    teacher = await db.get(Teacher, teacher_id)
+    if not teacher or teacher.institution_id != current_user.institution_id:
+        raise HTTPException(status_code=404, detail="Teacher not found")
+
+    from app.services import generate_random_password
+    from app.auth.service import hash_password
+
+    new_password = generate_random_password("TCH")
+    teacher.user.password_hash = hash_password(new_password)
+    teacher.user.status = UserStatus.ACTIVE
+    await db.commit()
+
+    return LoginPassResponse(
+        public_id=teacher.public_id,
+        full_name=teacher.full_name,
+        email_or_username=teacher.user.email,
+        password=new_password,
+        role=teacher.user.role.value if hasattr(teacher.user.role, 'value') else str(teacher.user.role),
+        status=teacher.user.status.value if hasattr(teacher.user.status, 'value') else str(teacher.user.status),
+    )

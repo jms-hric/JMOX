@@ -28,6 +28,14 @@ from app.auth.service import hash_password, log_audit, generate_activation_token
 from app.utils.ids import generate_public_id
 
 
+import secrets
+
+def generate_random_password(prefix: str = "JMO") -> str:
+    """Generate a readable, secure random login password."""
+    random_str = secrets.token_hex(4).upper()
+    return f"{prefix}-{random_str}"
+
+
 # =============================================================================
 # User/Teacher Services
 # =============================================================================
@@ -39,39 +47,52 @@ async def create_teacher(
     phone: Optional[str],
     institution_id: UUID,
     created_by: UUID,
-) -> Teacher:
-    """Create a teacher account (invited status)."""
-    # Create user
-    user = User(
-        public_id=await generate_public_id(db, "TCH", User),
-        email=email,
-        password_hash=None,  # Will be set on activation
-        role=UserRole.TEACHER,
-        status=UserStatus.INVITED,
-        institution_id=institution_id,
-    )
-    db.add(user)
-    await db.flush()
+    password: Optional[str] = None,
+) -> tuple[Teacher, str]:
+    """Create a teacher account and login pass."""
+    plain_password = password or generate_random_password("TCH")
 
-    # Create teacher profile
-    teacher = Teacher(
-        public_id=await generate_public_id(db, "TCH", Teacher),
-        user_id=user.id,
-        full_name=full_name,
-        phone=phone,
-        institution_id=institution_id,
-    )
-    db.add(teacher)
-    await db.flush()
+    # Check existing user
+    existing_res = await db.execute(select(User).options(selectinload(User.teacher)).where(User.email == email))
+    user = existing_res.scalar_one_or_none()
 
-    # Generate activation token
-    token, expires = generate_activation_token()
-    # TODO: Store token in DB and send email
+    if not user:
+        user = User(
+            public_id=await generate_public_id(db, "TCH", User),
+            email=email,
+            password_hash=hash_password(plain_password),
+            role=UserRole.TEACHER,
+            status=UserStatus.ACTIVE,
+            institution_id=institution_id,
+        )
+        db.add(user)
+        await db.flush()
+    else:
+        user.password_hash = hash_password(plain_password)
+        user.status = UserStatus.ACTIVE
+
+    if user.teacher:
+        teacher = user.teacher
+        teacher.full_name = full_name
+        if phone:
+            teacher.phone = phone
+    else:
+        teacher = Teacher(
+            public_id=await generate_public_id(db, "TCH", Teacher),
+            user_id=user.id,
+            full_name=full_name,
+            phone=phone,
+            institution_id=institution_id,
+        )
+        db.add(teacher)
+        await db.flush()
 
     await db.commit()
     await log_audit(db, created_by, AuditAction.CREATE, "Teacher", teacher.id, after_value={"email": email, "full_name": full_name})
 
-    return teacher
+    return teacher, plain_password
+
+
 
 
 async def activate_teacher(db: AsyncSession, user_id: UUID, password: str) -> User:
@@ -295,7 +316,9 @@ async def create_student(
     custom_fields: Optional[dict],
     institution_id: UUID,
     created_by: UUID,
-) -> Student:
+    password: Optional[str] = None,
+    create_login_pass: bool = True,
+) -> tuple[Student, Optional[str]]:
     guardian = None
     if guardian_data:
         g_dict = guardian_data.copy()
@@ -305,9 +328,53 @@ async def create_student(
         db.add(guardian)
         await db.flush()
 
+    student_pub_id = await generate_public_id(db, "STU", Student)
+
+    plain_password = None
+    user_id = None
+
+    if create_login_pass:
+        plain_password = password or generate_random_password("STD")
+        user_email = email or f"{student_pub_id.lower().replace('-', '')}@student.jmox.org"
+
+        # Check if user account already exists
+        existing_res = await db.execute(select(User).options(selectinload(User.student)).where(User.email == user_email))
+        user = existing_res.scalar_one_or_none()
+
+        if not user:
+            user = User(
+                public_id=await generate_public_id(db, "USR", User),
+                email=user_email,
+                password_hash=hash_password(plain_password),
+                role=UserRole.STUDENT,
+                status=UserStatus.ACTIVE,
+                institution_id=institution_id,
+            )
+            db.add(user)
+            await db.flush()
+        elif not user.student:
+            user.password_hash = hash_password(plain_password)
+            user.status = UserStatus.ACTIVE
+        else:
+            user_email = f"{student_pub_id.lower().replace('-', '')}@student.jmox.org"
+            user = User(
+                public_id=await generate_public_id(db, "USR", User),
+                email=user_email,
+                password_hash=hash_password(plain_password),
+                role=UserRole.STUDENT,
+                status=UserStatus.ACTIVE,
+                institution_id=institution_id,
+            )
+            db.add(user)
+            await db.flush()
+
+        user_id = user.id
+
+
 
     student = Student(
-        public_id=await generate_public_id(db, "STU", Student),
+        public_id=student_pub_id,
+        user_id=user_id,
         full_name=full_name,
         date_of_birth=date_of_birth,
         gender=gender,
@@ -343,7 +410,8 @@ async def create_student(
 
     await db.commit()
     await log_audit(db, created_by, AuditAction.CREATE, "Student", student.id)
-    return student
+    return student, plain_password
+
 
 
 async def transfer_student(

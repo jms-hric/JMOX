@@ -78,16 +78,18 @@ async def login(
             path="/",
         )
 
-        teacher_id = None
+        full_name = user.email
         if user.role == UserRole.TEACHER and user.teacher:
-            teacher_id = user.teacher.id
+            full_name = user.teacher.full_name
+        elif user.role == UserRole.STUDENT and user.student:
+            full_name = user.student.full_name
 
         user_response = UserResponse(
             id=user.id,
             public_id=user.public_id,
             email=user.email,
             role=user.role,
-            full_name=user.teacher.full_name if user.teacher else user.email,
+            full_name=full_name,
             status=user.status,
         )
 
@@ -98,21 +100,21 @@ async def login(
         access_token = create_access_token(user.id, user.role, settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
         refresh_token = create_refresh_token(user.id)
 
-        # Store refresh token in DB for revocation (simplified - in production use a separate table)
-        # For now, we'll just return it
-
-        teacher_id = None
+        full_name = user.email
         if user.role == UserRole.TEACHER and user.teacher:
-            teacher_id = user.teacher.id
+            full_name = user.teacher.full_name
+        elif user.role == UserRole.STUDENT and user.student:
+            full_name = user.student.full_name
 
         user_response = UserResponse(
             id=user.id,
             public_id=user.public_id,
             email=user.email,
             role=user.role,
-            full_name=user.teacher.full_name if user.teacher else user.email,
+            full_name=full_name,
             status=user.status,
         )
+
 
         return LoginResponseAndroid(
             user=user_response,

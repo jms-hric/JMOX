@@ -140,6 +140,8 @@ class AuditAction(str):
     TRANSFER = "transfer"
     WITHDRAW = "withdraw"
     SYNC_CONFLICT = "sync_conflict"
+    LOGIN = "login"
+    LOGOUT = "logout"
 
 
 class AuditLog(Base, InstitutionMixin):

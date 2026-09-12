@@ -126,6 +126,15 @@ class GuardianResponse(GuardianBase):
         from_attributes = True
 
 
+class LoginPassResponse(BaseModel):
+    public_id: str
+    full_name: str
+    email_or_username: str
+    password: Optional[str] = None
+    role: str
+    status: str
+
+
 class StudentBase(BaseModel):
     full_name: str = Field(..., min_length=1, max_length=255)
     date_of_birth: Optional[date] = None
@@ -141,6 +150,8 @@ class StudentCreate(StudentBase):
     batch_id: Optional[UUID] = None
     enrollment_date: Optional[date] = None
     custom_fields: Optional[dict] = None
+    password: Optional[str] = Field(None, min_length=4, max_length=100)
+    create_login_pass: bool = True
 
 
 class StudentUpdate(StudentBase):
@@ -156,6 +167,7 @@ class StudentResponse(StudentBase):
     current_batch: Optional[dict] = None
     status: str
     custom_fields: List[dict] = []
+    login_pass: Optional[LoginPassResponse] = None
     created_at: datetime
 
     class Config:
@@ -170,7 +182,7 @@ class TeacherBase(BaseModel):
 
 
 class TeacherCreate(TeacherBase):
-    pass
+    password: Optional[str] = Field(None, min_length=4, max_length=100)
 
 
 class TeacherUpdate(BaseModel):
@@ -186,10 +198,12 @@ class TeacherResponse(BaseModel):
     phone: Optional[str]
     status: str
     assigned_batches: List[dict] = []
+    login_pass: Optional[LoginPassResponse] = None
     created_at: datetime
 
     class Config:
         from_attributes = True
+
 
 
 # Class schemas

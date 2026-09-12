@@ -150,52 +150,34 @@ async def create_student(
     current_user = Depends(require_admin),
     db: AsyncSession = Depends(get_async_session),
 ):
-    # Generate public ID
-    from app.utils.ids import generate_public_id
-    public_id = await generate_public_id(db, "STU", Student)
+    from app.services import create_student as create_student_svc
+    guardian_dict = data.guardian.model_dump() if data.guardian else None
 
-    # Create guardian if provided
-    guardian = None
-    if data.guardian:
-        g_dict = data.guardian.model_dump()
-        if "relationship" in g_dict:
-            g_dict["relationship_type"] = g_dict.pop("relationship")
-        guardian = Guardian(**g_dict, institution_id=current_user.institution_id)
-        db.add(guardian)
-        await db.flush()
-
-
-    student = Student(
-        public_id=public_id,
+    student, plain_password = await create_student_svc(
+        db=db,
         full_name=data.full_name,
         date_of_birth=data.date_of_birth,
         gender=data.gender,
         photo_url=data.photo_url,
         phone=data.phone,
         email=data.email,
-        guardian_id=guardian.id if guardian else None,
+        guardian_data=guardian_dict,
+        class_id=data.class_id,
+        batch_id=data.batch_id,
+        enrollment_date=data.enrollment_date,
+        custom_fields=data.custom_fields,
         institution_id=current_user.institution_id,
+        created_by=current_user.id,
+        password=data.password,
+        create_login_pass=data.create_login_pass,
     )
-    db.add(student)
-    await db.flush()
 
-    # Create enrollment
+    await db.refresh(student, ["guardian", "user"])
+
     current_class = None
     current_batch = None
     if data.class_id and data.batch_id:
-        from app.models.core import StudentBatch, StudentBatchStatus
         from app.models.academic import Class, Batch
-
-        enrollment = StudentBatch(
-            student_id=student.id,
-            batch_id=data.batch_id,
-            class_id=data.class_id,
-            enrolled_date=data.enrollment_date or date.today(),
-            status=StudentBatchStatus.ACTIVE,
-            institution_id=current_user.institution_id,
-        )
-        db.add(enrollment)
-
         cls = await db.get(Class, data.class_id)
         batch = await db.get(Batch, data.batch_id)
         if cls:
@@ -203,25 +185,17 @@ async def create_student(
         if batch:
             current_batch = BatchRef(id=batch.id, name=batch.name)
 
-    # Custom fields
-    if data.custom_fields:
-        from app.models.extras import CustomFieldValue
-        for field_id, value in data.custom_fields.items():
-            cfv = CustomFieldValue(
-                custom_field_id=UUID(field_id),
-                student_id=student.id,
-                value=str(value),
-                institution_id=current_user.institution_id,
-            )
-            db.add(cfv)
-
-    await db.commit()
-    await db.refresh(student)
-
-    # Log audit
-    from app.auth.service import log_audit
-    from app.models.extras import AuditAction
-    await log_audit(db, current_user.id, AuditAction.CREATE, "Student", student.id, after_value=data.model_dump())
+    login_pass = None
+    if plain_password and student.user:
+        from app.schemas.common import LoginPassResponse
+        login_pass = LoginPassResponse(
+            public_id=student.public_id,
+            full_name=student.full_name,
+            email_or_username=student.user.email,
+            password=plain_password,
+            role="student",
+            status=student.user.status.value,
+        )
 
     return StudentResponse(
         id=student.id,
@@ -232,11 +206,12 @@ async def create_student(
         photo_url=student.photo_url,
         phone=student.phone,
         email=student.email,
-        guardian=guardian,
+        guardian=student.guardian,
         current_class=current_class,
         current_batch=current_batch,
         status=student.status,
         custom_fields=[],
+        login_pass=login_pass,
         created_at=student.created_at,
     )
 
@@ -253,7 +228,6 @@ async def get_student(
 
     # Check access for teachers
     if current_user.role.value == "teacher":
-        # Check if student is in any assigned batch
         from app.models.academic import TeacherBatch, StudentBatch, StudentBatchStatus
         result = await db.execute(
             select(TeacherBatch.batch_id).where(
@@ -289,6 +263,80 @@ async def get_student(
         custom_fields=[],
         created_at=student.created_at,
     )
+
+
+@router.get("/{student_id}/login-pass", response_model=LoginPassResponse)
+async def get_student_login_pass(
+    student_id: UUID,
+    current_user = Depends(require_admin),
+    db: AsyncSession = Depends(get_async_session),
+):
+    student = await db.get(Student, student_id)
+    if not student or student.institution_id != current_user.institution_id:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    user = student.user
+    if not user:
+        raise HTTPException(status_code=404, detail="No login account found for this student")
+
+    from app.schemas.common import LoginPassResponse
+    return LoginPassResponse(
+        public_id=student.public_id,
+        full_name=student.full_name,
+        email_or_username=user.email,
+        password=None,
+        role=user.role.value if hasattr(user.role, 'value') else str(user.role),
+        status=user.status.value if hasattr(user.status, 'value') else str(user.status),
+    )
+
+
+@router.post("/{student_id}/reset-login-pass", response_model=LoginPassResponse)
+async def reset_student_login_pass(
+    student_id: UUID,
+    current_user = Depends(require_admin),
+    db: AsyncSession = Depends(get_async_session),
+):
+    student = await db.get(Student, student_id)
+    if not student or student.institution_id != current_user.institution_id:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    from app.services import generate_random_password
+    from app.auth.service import hash_password
+    from app.utils.ids import generate_public_id
+    from app.models.core import UserRole, UserStatus
+
+    new_password = generate_random_password("STD")
+    user = student.user
+
+    if not user:
+        user_email = student.email or f"{student.public_id.lower().replace('-', '')}@student.jmox.org"
+        user = User(
+            public_id=await generate_public_id(db, "USR", User),
+            email=user_email,
+            password_hash=hash_password(new_password),
+            role=UserRole.STUDENT,
+            status=UserStatus.ACTIVE,
+            institution_id=current_user.institution_id,
+        )
+        db.add(user)
+        await db.flush()
+        student.user_id = user.id
+    else:
+        user.password_hash = hash_password(new_password)
+        user.status = UserStatus.ACTIVE
+
+    await db.commit()
+
+    from app.schemas.common import LoginPassResponse
+    return LoginPassResponse(
+        public_id=student.public_id,
+        full_name=student.full_name,
+        email_or_username=user.email,
+        password=new_password,
+        role=user.role.value if hasattr(user.role, 'value') else str(user.role),
+        status=user.status.value if hasattr(user.status, 'value') else str(user.status),
+    )
+
 
 
 # Additional endpoints (update, transfer, withdraw, import, export) would go here

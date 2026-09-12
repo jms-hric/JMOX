@@ -6,6 +6,9 @@ from pydantic import BaseModel, EmailStr, Field
 from app.models.core import StudentStatus
 
 
+from app.schemas.common import LoginPassResponse
+
+
 class GuardianSchema(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     relationship: Optional[str] = Field(None, max_length=50)
@@ -25,6 +28,8 @@ class StudentCreate(BaseModel):
     batch_id: Optional[UUID] = None
     enrollment_date: Optional[date] = None
     custom_fields: Optional[dict] = None
+    password: Optional[str] = Field(None, min_length=4, max_length=100)
+    create_login_pass: bool = True
 
 
 class StudentUpdate(BaseModel):
@@ -79,11 +84,13 @@ class StudentResponse(BaseModel):
     current_class: Optional[ClassRef]
     current_batch: Optional[BatchRef]
     status: StudentStatus
-    custom_fields: list
+    custom_fields: list = []
+    login_pass: Optional[LoginPassResponse] = None
     created_at: datetime
 
     class Config:
         from_attributes = True
+
 
 
 class StudentListResponse(BaseModel):

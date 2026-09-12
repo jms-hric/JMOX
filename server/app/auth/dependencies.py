@@ -27,8 +27,11 @@ async def get_current_user(
             user = await get_user_by_id(db, user_id)
             if user and user.status == UserStatus.ACTIVE:
                 teacher_id = None
+                student_id = None
                 if user.role == UserRole.TEACHER and user.teacher:
                     teacher_id = user.teacher.id
+                elif user.role == UserRole.STUDENT and user.student:
+                    student_id = user.student.id
                 return CurrentUser(
                     id=user.id,
                     public_id=user.public_id,
@@ -36,6 +39,7 @@ async def get_current_user(
                     role=user.role,
                     status=user.status.value,
                     teacher_id=teacher_id,
+                    student_id=student_id,
                     institution_id=user.institution_id,
                 )
 
@@ -52,8 +56,11 @@ async def get_current_user(
                     user = await get_user_by_id(db, user_id)
                     if user and user.status == UserStatus.ACTIVE:
                         teacher_id = None
+                        student_id = None
                         if user.role == UserRole.TEACHER and user.teacher:
                             teacher_id = user.teacher.id
+                        elif user.role == UserRole.STUDENT and user.student:
+                            student_id = user.student.id
                         return CurrentUser(
                             id=user.id,
                             public_id=user.public_id,
@@ -61,8 +68,10 @@ async def get_current_user(
                             role=user.role,
                             status=user.status.value,
                             teacher_id=teacher_id,
+                            student_id=student_id,
                             institution_id=user.institution_id,
                         )
+
                 except ValueError:
                     pass
 
